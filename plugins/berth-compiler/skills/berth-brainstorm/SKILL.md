@@ -1,12 +1,8 @@
 ---
 name: berth-brainstorm
-description: Explore and specify a Berth Agent domain, workflow, edge cases, tools, approvals, runtime activity labels, and acceptance cases before implementation. Use when an Agent idea is incomplete or high-risk.
+description: Internal Berth Compiler discovery stage for exploring a new Agent's domain, users, workflow, rules, tools, approvals, edge cases, runtime labels, and acceptance behavior. Use as part of berth-compiler; maintain the one-question-per-turn rule and do not require users to invoke this skill directly.
 ---
 
-# Berth Agent Brainstorm
+# Berth Brainstorm
 
-Produce a concrete `AGENT_SPEC.md`, not implementation.
-
-Cover the user, job, input examples, required outputs, consequences of errors, missing-input behavior, deterministic tools, model decisions, approvals, domain rules, external services, secrets, artefacts, edge cases, runtime activity labels, and acceptance cases.
-
-Ask one high-value unresolved question at a time. Use language appropriate to the domain. Convert internal operations into user-understandable activity labels, and distinguish execution, waiting for input, waiting for approval, retrying, cancellation, timeout, failure, and completion.
+Explore one unresolved topic per conversational turn. Update `AGENT_SPEC.md` after every answer. Prefer repository and domain evidence over questions. Cover workflow, edge cases, decisions, SOPs, external systems, failures, approvals, artefacts, and user-readable runtime states. Mark uncertainty instead of inventing facts.

@@ -1,7 +1,7 @@
 {
   "name": "berth-compiler",
-  "version": "0.1.1",
-  "description": "Create or convert agents into validated Berth packages, verify fidelity, and publish them.",
+  "version": "0.2.0",
+  "description": "Automatically interview, create or reconstruct, validate, fidelity-test, and publish Berth Agents with exactly one user decision per turn.",
   "author": {
     "name": "Berth Platform",
     "email": "jerry.h2oslabs@gmail.com",
@@ -14,16 +14,16 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Berth Compiler",
-    "shortDescription": "Build, convert, validate, and publish Berth agents.",
-    "longDescription": "Turn an agent idea or an existing agent project into a Berth package. The plugin inventories capabilities, generates runtime status labels, validates the package, compares behavior for migration fidelity, and publishes to the configured Berth platform.",
+    "shortDescription": "One-question-at-a-time Agent creation and migration.",
+    "longDescription": "Choose the local or competition Berth platform, validate a developer token, then let Codex run a strict one-question-per-turn interview, create or reconstruct Agent packages, validate fidelity, and upload privately or publicly.",
     "developerName": "Berth Platform",
     "category": "Development",
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://github.com/zhaomaota97/berth-codex-plugin",
     "defaultPrompt": [
-      "Create a new Berth agent from my requirements.",
-      "Convert the agent in this repository into a Berth package.",
-      "Validate this Berth package and report migration fidelity."
+      "帮我创建并上传一个 Berth Agent。每轮只问我一个问题，其余流程你自动完成。",
+      "把当前项目里的 Agent 高还原度转换并上传到 Berth。每轮只让我做一个选择。",
+      "检查并修好当前 Berth Agent，直到达到可发布状态。"
     ],
     "brandColor": "#2563EB"
   }

@@ -1,75 +1,49 @@
 # Berth Compiler for Codex
 
-Official Codex plugin for building and migrating agents to the Berth Agent Platform.
+Official Codex Plugin for inventing new Berth Agents or reconstructing existing Agent projects with high behavioral fidelity.
 
-It supports two workflows:
-
-- Create a Berth Agent from an idea or specification.
-- Convert an existing Agent project into a Berth Package and produce a fidelity report.
-
-The plugin discovers models from the configured Berth platform, creates package files, adds user-readable runtime activity labels, validates approval behavior, runs package checks, and publishes through the developer API.
-
-## Install from the repository marketplace
+## Install
 
 ```bash
 codex plugin marketplace add zhaomaota97/berth-codex-plugin
 codex plugin add berth-compiler@berth-platform
 ```
 
-Start a new Codex thread after installation so the skills are loaded.
-
-## Configuration
-
-Set the target platform URL. It is intentionally required; the plugin never silently falls back to localhost.
-
-```bash
-export BERTH_URL="https://berth.example.com"
-```
-
-Publishing also requires a developer token from the Berth console:
-
-```bash
-export BERTH_TOKEN="bt_xxx"
-```
-
-Do not commit either value to a repository.
+Start a new Thread after installation or upgrade.
 
 ## Usage
 
-Ask Codex one of the following:
+Use natural language; do not choose internal Skills:
 
 ```text
-Use berth-compiler to create a new Agent.
-Use berth-compiler to convert the Agent in this repository.
-Use berth-validator to validate packages/my-agent.
+帮我创建并上传一个 Berth Agent。每轮只问我一个问题，其余流程你自动完成。
 ```
 
-For an existing Agent, the plugin creates:
+The Plugin enforces this sequence:
 
-```text
-.berth/
-├── conversion-inventory.json
-├── conversion-map.json
-└── fidelity-report.json
-```
+1. Choose **本地服** (`http://127.0.0.1:8600`) or **比赛服** (`http://61.29.254.146`).
+2. Enter a `bt_` developer token; the Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
+3. Fetch enabled models from that platform's `GET /v1/models`.
+4. Choose whether to reconstruct an existing Agent or invent a new one.
+5. Complete a one-question-per-turn brainstorm and grill-me interview.
+6. Generate Package(s), validate, repair, and verify fidelity.
+7. Choose private or public upload, then publish and follow the job.
 
-The report distinguishes preserved, adapted, degraded, unsupported, and explicitly removed capabilities. A successful build is not treated as proof of behavioral equivalence.
+The token is never written to files or reports.
 
-## Platform endpoints
+## Multiple source Agents
 
-- Models: `GET ${BERTH_URL}/v1/models`
-- Synchronous publish: `POST ${BERTH_URL}/v1/dev/publish`
-- Asynchronous publish: `POST ${BERTH_URL}/v1/dev/publish-async`
-- Publish job: `GET ${BERTH_URL}/v1/dev/publish-jobs/{job_id}`
+If an existing repository contains multiple Agents, the Plugin inventories them first and asks one scope choice: merge them into one Package, convert all into separate Packages, or select a subset. Each converted Package receives its own capability map and fidelity evidence.
 
-## Marketplace support
+## Fidelity
 
-Codex supports personal and repository/team marketplaces. This repository is a marketplace named `berth-platform`; the plugin is installed as `berth-compiler@berth-platform`.
+A successful build is not treated as behavioral equivalence. The Plugin compares source and converted workflows, tools, approvals, attachments, schemas, artefacts, edge cases, failures, retries, and multi-turn behavior. Critical mismatches block publication regardless of aggregate score.
 
 ## Development
 
 ```bash
 python3 scripts/validate_all.py
+python3 -m unittest tests/test_plugin.py
 ```
 
-The repository is licensed under MIT.
+MIT licensed.

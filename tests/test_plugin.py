@@ -57,15 +57,23 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "berth-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
 
-    def test_url_is_required(self):
+    def test_fixed_platform_urls(self):
         api = load_api()
-        old = os.environ.pop("BERTH_URL", None)
+        self.assertEqual(api.base_url("local"), "http://127.0.0.1:8600")
+        self.assertEqual(api.base_url("competition"), "http://61.29.254.146")
+
+    def test_token_requires_bt_prefix(self):
+        api = load_api()
+        old = os.environ.get("BERTH_TOKEN")
+        os.environ["BERTH_TOKEN"] = "wrong"
         try:
             with self.assertRaises(SystemExit):
-                api.base_url()
+                api.request("competition", "/v1/dev/me", auth=True)
         finally:
-            if old is not None:
-                os.environ["BERTH_URL"] = old
+            if old is None:
+                os.environ.pop("BERTH_TOKEN", None)
+            else:
+                os.environ["BERTH_TOKEN"] = old
 
     def test_package_tarball(self):
         api = load_api()
