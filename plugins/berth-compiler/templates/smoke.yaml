@@ -1,0 +1,14 @@
+cases:
+  - name: primary-capability
+    input: COMPLETE_SELF_CONTAINED_INPUT
+    expect:
+      status: completed
+      contains:
+        - EXPECTED_OUTPUT
+
+  - name: missing-input
+    input: INCOMPLETE_INPUT
+    expect:
+      status: completed
+      contains:
+        - EXPECTED_QUESTION

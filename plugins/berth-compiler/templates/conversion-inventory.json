@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "source_type": "unknown",
+  "entrypoints": [],
+  "prompts": [],
+  "capabilities": [],
+  "tools": [],
+  "skills": [],
+  "mcp_servers": [],
+  "sub_agents": [],
+  "workflows": [],
+  "models": [],
+  "external_services": [],
+  "secrets": [],
+  "inputs": [],
+  "outputs": [],
+  "artifacts": [],
+  "runtime_dependencies": [],
+  "critical_capabilities": [],
+  "unsupported_features": []
+}

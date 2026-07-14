@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "source": "SOURCE_ITEM",
+      "target": "TARGET_ITEM",
+      "status": "preserved",
+      "changes": [],
+      "reason": "",
+      "user_impact": ""
+    }
+  ]
+}

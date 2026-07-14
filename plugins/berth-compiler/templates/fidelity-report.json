@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "plugin_version": "0.1.0",
+  "package_sha256": "",
+  "source_type": "unknown",
+  "grade": "unverified",
+  "score": null,
+  "critical_assertions": {
+    "passed": 0,
+    "failed": 0,
+    "items": []
+  },
+  "dimensions": {
+    "task_semantics": null,
+    "capabilities_tools": null,
+    "instructions_rules": null,
+    "outputs_artifacts": null,
+    "workflow_approvals": null,
+    "multi_turn": null,
+    "performance_resources": null
+  },
+  "preserved": [],
+  "adapted": [],
+  "degraded": [],
+  "unsupported": [],
+  "unverified": [],
+  "cases": [],
+  "verified_at": null
+}

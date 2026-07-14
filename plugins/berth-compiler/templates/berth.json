@@ -1,0 +1,33 @@
+{
+  "id": "AGENT_ID",
+  "name": "AGENT_NAME",
+  "version": "0.1.0",
+  "runtime": "eve",
+  "capabilities": ["CAPABILITY_ID"],
+  "description": "AGENT_DESCRIPTION",
+  "pricing": {
+    "model": "per_run",
+    "amount_cents": 10
+  },
+  "secrets": [],
+  "approval_required": [],
+  "entry": {},
+  "examples": ["EXAMPLE_1", "EXAMPLE_2", "EXAMPLE_3"],
+  "greeting": "GREETING_TEXT",
+  "author": {
+    "name": "AUTHOR_NAME"
+  },
+  "icon": "📦",
+  "tags": ["TAG_1", "TAG_2"],
+  "mcp_servers": [],
+  "runtime_ui": {
+    "startup_message": "正在启动 AGENT_NAME…",
+    "default_working_message": "正在处理你的请求…",
+    "capabilities": {
+      "CAPABILITY_ID": {
+        "display_name": "CAPABILITY_DISPLAY_NAME",
+        "loading_message": "正在加载 CAPABILITY_DISPLAY_NAME…"
+      }
+    }
+  }
+}

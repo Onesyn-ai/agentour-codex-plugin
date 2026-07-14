@@ -1,0 +1,30 @@
+{
+  "name": "berth-compiler",
+  "version": "0.1.0",
+  "description": "Create or convert agents into validated Berth packages, verify fidelity, and publish them.",
+  "author": {
+    "name": "Berth Platform",
+    "email": "jerry.h2oslabs@gmail.com",
+    "url": "https://github.com/zhaomaota97"
+  },
+  "homepage": "https://github.com/zhaomaota97/berth-codex-plugin#readme",
+  "repository": "https://github.com/zhaomaota97/berth-codex-plugin",
+  "license": "MIT",
+  "keywords": ["agent", "berth", "compiler", "migration", "publishing"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Berth Compiler",
+    "shortDescription": "Build, convert, validate, and publish Berth agents.",
+    "longDescription": "Turn an agent idea or an existing agent project into a Berth package. The plugin inventories capabilities, generates runtime status labels, validates the package, compares behavior for migration fidelity, and publishes to the configured Berth platform.",
+    "developerName": "Berth Platform",
+    "category": "Development",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/zhaomaota97/berth-codex-plugin",
+    "defaultPrompt": [
+      "Create a new Berth agent from my requirements.",
+      "Convert the agent in this repository into a Berth package.",
+      "Validate this Berth package and report migration fidelity."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "AGENT_ID",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "build": "eve build",
+    "start": "eve start"
+  },
+  "dependencies": {
+    "@ai-sdk/deepseek": "^3.0.5",
+    "eve": "^0.20.0",
+    "just-bash": "^3.0.2",
+    "zod": "^4.0.0"
+  }
+}
