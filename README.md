@@ -21,7 +21,7 @@ Use natural language; do not choose internal Skills:
 
 The Plugin enforces this sequence:
 
-1. Choose **本地服** (`http://127.0.0.1:8600`) or **比赛服** (`http://61.29.254.146`).
+1. Choose **本地服** (`http://127.0.0.1:8600`) or **比赛服** (`https://agentour.ai`).
 2. Enter a `at_` developer token; the Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
 3. Fetch models from that platform's `GET /v1/models`, probe every model, and remove unavailable models before selection.
 4. Choose whether to reconstruct an existing Agent or invent a new one.

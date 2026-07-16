@@ -33,7 +33,7 @@ Every interactive turn may ask exactly one question or request exactly one choic
 | Choice | Name | URL |
 |---|---|---|
 | A | 本地服 | `http://127.0.0.1:8600` |
-| B | 比赛服 | `http://61.29.254.146` |
+| B | 比赛服 | `https://agentour.ai` |
 
 Never ask the user to type a URL. Never infer localhost for 比赛服.
 
@@ -160,6 +160,15 @@ For multiple Packages, first ask whether one setting applies to all or should be
 ## Upload
 
 Revalidate the token immediately before upload. Show one compact summary of platform, Agent IDs, versions, models, visibility, validation, fidelity, and limitations. If upload was already requested, proceed; otherwise ask one final upload confirmation.
+
+Only after that explicit confirmation, run the paid-resource remote Build Gate. Never run it during discovery, interview, local validation, visibility selection, or while awaiting confirmation. Cached content does not consume a new E2B Build quota.
+
+```bash
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
+  --platform <local|competition> remote-build packages/<agent-id>
+```
+
+Use the structured `gates` result to repair deterministic failures. Do not retry unchanged content blindly; retry only after a repair or for the single transient retry handled by the platform. Publish only when the remote Build status is `succeeded`.
 
 ```bash
 AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \

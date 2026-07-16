@@ -24,7 +24,7 @@ from credential_store import delete_token, get_token
 
 PLATFORMS = {
     "local": {"name": "本地服", "url": "http://127.0.0.1:8600"},
-    "competition": {"name": "比赛服", "url": "http://61.29.254.146"},
+    "competition": {"name": "比赛服", "url": "https://agentour.ai"},
 }
 DEFAULT_IGNORES = {
     "node_modules", ".output", ".eve", ".workflow-data", ".git",
@@ -282,6 +282,29 @@ def cmd_validate(args):
     raise SystemExit(f"Validation job {job_id} timed out")
 
 
+def cmd_remote_build(args):
+    package = pathlib.Path(args.package).resolve()
+    payload, stats = package_payload(package)
+    result = request(args.platform, "/v1/dev/builds", method="POST", data=payload,
+                     auth=True, content_type="application/gzip")
+    print(json.dumps({**result, "archive": stats}, ensure_ascii=False), flush=True)
+    job_id = result.get("job_id")
+    if not job_id or args.no_wait:
+        return
+    deadline = time.monotonic() + args.timeout
+    previous = None
+    while time.monotonic() < deadline:
+        job = authenticated(args, f"/v1/dev/builds/{job_id}")
+        signature = (job.get("status"), json.dumps(job.get("data", {}).get("gates", []), sort_keys=True))
+        if signature != previous:
+            print(json.dumps(job, ensure_ascii=False), flush=True); previous = signature
+        if job.get("status") in {"succeeded", "failed", "cancelled", "timed_out"}:
+            if job.get("status") != "succeeded": raise SystemExit(1)
+            return
+        time.sleep(args.poll_interval)
+    raise SystemExit(f"Build Job {job_id} timed out")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", choices=PLATFORMS, default="competition")
@@ -307,6 +330,11 @@ def main():
     validate.add_argument("package")
     validate.add_argument("--timeout", type=float, default=1800)
     validate.add_argument("--poll-interval", type=float, default=2)
+    remote_build = sub.add_parser("remote-build")
+    remote_build.add_argument("package")
+    remote_build.add_argument("--no-wait", action="store_true")
+    remote_build.add_argument("--timeout", type=float, default=1800)
+    remote_build.add_argument("--poll-interval", type=float, default=2)
     for name in ("publish", "publish-async"):
         publish = sub.add_parser(name)
         publish.add_argument("package")
@@ -341,6 +369,8 @@ def main():
         cmd_build_test(args)
     elif args.command == "validate-package":
         cmd_validate(args)
+    elif args.command == "remote-build":
+        cmd_remote_build(args)
     elif args.command == "publish":
         cmd_publish(args, False)
     else:

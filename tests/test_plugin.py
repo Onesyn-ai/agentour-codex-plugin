@@ -9,6 +9,8 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -60,7 +62,8 @@ class PluginTests(unittest.TestCase):
     def test_fixed_platform_urls(self):
         api = load_api()
         self.assertEqual(api.base_url("local"), "http://127.0.0.1:8600")
-        self.assertEqual(api.base_url("competition"), "http://61.29.254.146")
+        self.assertEqual(api.base_url("competition"), "https://agentour.ai")
+        self.assertIn("remote-build", (PLUGIN / "scripts/agentour_api.py").read_text())
 
     def test_template_requires_session_scoped_runtime_token(self):
         template = (PLUGIN / "templates/agent.ts").read_text(encoding="utf-8")
@@ -126,6 +129,19 @@ class PluginTests(unittest.TestCase):
             payload, _ = api.package_payload(package)
             with tarfile.open(fileobj=__import__("io").BytesIO(payload), mode="r:gz") as archive:
                 self.assertFalse(any("node_modules" in name for name in archive.getnames()))
+
+    def test_remote_build_waits_for_structured_success(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            args = SimpleNamespace(package=str(package), platform="competition",
+                                   no_wait=False, timeout=10, poll_interval=0)
+            with mock.patch.object(api, "request", return_value={"job_id": "bld_1", "status": "queued"}), \
+                 mock.patch.object(api, "authenticated", return_value={
+                     "job_id": "bld_1", "status": "succeeded",
+                     "data": {"gates": [{"gate": "remote_build", "status": "pass"}]}}):
+                api.cmd_remote_build(args)
 
     def test_valid_package(self):
         with tempfile.TemporaryDirectory() as temp:
