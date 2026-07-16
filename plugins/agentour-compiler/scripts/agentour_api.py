@@ -32,7 +32,7 @@ DEFAULT_IGNORES = {
 }
 DEFAULT_PATTERNS = {"*.log", "*.tmp", "*.swp", ".agentour-*.log"}
 PLUGIN_VERSION = "0.5.1"
-LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/zhaomaota97/agentour-codex-plugin/main/plugins/agentour-compiler/.codex-plugin/plugin.json"
+LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/Onesyn-ai/agentour-codex-plugin/main/plugins/agentour-compiler/.codex-plugin/plugin.json"
 
 
 def base_url(platform: str) -> str:

@@ -5,7 +5,7 @@ Official Codex Plugin for inventing new Agentour Agents or reconstructing existi
 ## Install
 
 ```bash
-codex plugin marketplace add zhaomaota97/agentour-codex-plugin
+codex plugin marketplace add Onesyn-ai/agentour-codex-plugin
 codex plugin add agentour-compiler@agentour-platform
 ```
 
