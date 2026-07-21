@@ -5,7 +5,13 @@ description: Internal Agentour Compiler discovery stage for exploring a new Agen
 
 # Agentour Brainstorm
 
-Explore one unresolved topic per conversational turn. Update `AGENT_SPEC.md` after every answer. Prefer repository and domain evidence over questions. Cover workflow, edge cases, decisions, SOPs, external systems, failures, approvals, artefacts, and user-readable runtime states. Mark uncertainty instead of inventing facts.
+For a new Agent, first invite one unrestricted idea dump rather than starting with a questionnaire.
+Parse it into `AGENT_SPEC.md` and an evidence map whose fields record value, confidence, and source
+(`user_explicit`, `source_discovered`, `platform_discovered`, `inferred`, `defaulted`, `missing`).
+After that, explore one unresolved high-impact topic per conversational turn. Prefer repository,
+Package, platform, and domain evidence over questions. Cover workflow, edge cases, decisions, SOPs,
+external systems, failures, approvals, artefacts, and user-readable runtime states. Mark uncertainty
+instead of inventing facts. Do not ask about a field already answered clearly in the initial idea dump.
 
 Order questions by information gain. Safety boundaries, required inputs, external-data truthfulness, completion criteria and failure behavior come before low-risk naming, icon, welcome text or default pricing. Generate reasonable low-risk defaults and let the user accept or revise them later without spending separate interview turns.
 

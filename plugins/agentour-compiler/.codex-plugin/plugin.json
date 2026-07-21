@@ -1,7 +1,7 @@
 {
   "name": "agentour-compiler",
-  "version": "0.7.0",
-  "description": "Automatically interview, create or reconstruct, validate, fidelity-test, and publish Agentour Agents with exactly one user decision per turn.",
+  "version": "0.8.0",
+  "description": "Create, update or reconstruct Agentour Agents with adaptive discovery, durable checkpoints, validation, fidelity tests and publishing.",
   "author": {
     "name": "Agentour Platform",
     "email": "jerry.h2oslabs@gmail.com",
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Agentour Compiler",
-    "shortDescription": "One-question-at-a-time Agent creation and migration.",
-    "longDescription": "Choose the local or competition Agentour platform, validate a developer token, then let Codex run a strict one-question-per-turn interview, create or reconstruct Agent packages, validate fidelity, and upload privately or publicly.",
+    "shortDescription": "Adaptive Agent creation, updates, recovery and migration.",
+    "longDescription": "Create, update or reconstruct Agentour Packages with a mature-user idea dump, targeted one-question follow-ups, platform-backed resumable checkpoints, model discovery, fidelity validation and private or public publishing.",
     "developerName": "Agentour Platform",
     "category": "Development",
     "capabilities": [

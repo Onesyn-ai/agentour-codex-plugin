@@ -64,6 +64,24 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(api.base_url("local"), "http://127.0.0.1:8600")
         self.assertEqual(api.base_url("competition"), "https://agentour.ai")
         self.assertIn("remote-build", (PLUGIN / "scripts/agentour_api.py").read_text())
+        self.assertIn("compiler-tasks", (PLUGIN / "scripts/agentour_api.py").read_text())
+
+    def test_compiler_skill_supports_update_and_adaptive_discovery(self):
+        skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("更新已发布的 Agent", skill)
+        self.assertIn("请尽可能完整地讲讲你想做的 Agent", skill)
+        self.assertIn("/v1/dev/compiler-tasks", skill)
+        self.assertIn("checkpoint-package", skill)
+
+    def test_compiler_task_commands_send_expected_contract(self):
+        api = load_api()
+        args = SimpleNamespace(platform="competition", operation="update",
+                               agent_id="demo", workspace_id="ws-hash",
+                               state='{"stage":"discovery"}')
+        with mock.patch.object(api, "authenticated", return_value={"id": "cmp_1"}) as call:
+            api.cmd_create_compiler_task(args)
+        self.assertEqual(call.call_args.args[1], "/v1/dev/compiler-tasks")
+        self.assertEqual(call.call_args.kwargs["body"]["operation"], "update")
 
     def test_template_requires_session_scoped_runtime_token(self):
         template = (PLUGIN / "templates/agent.ts").read_text(encoding="utf-8")

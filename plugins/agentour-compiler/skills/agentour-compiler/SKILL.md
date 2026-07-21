@@ -37,9 +37,21 @@ Every interactive turn may ask exactly one question or request exactly one choic
 
 Never ask the user to type a URL. Never infer localhost for 比赛服.
 
-## Mandatory state machine
+## Mandatory dual state machine
 
-Persist non-secret progress in `.agentour/compiler-state.json` so a new Thread can resume. Never store the token.
+Persist non-secret progress both in `.agentour/compiler-state.json` and the selected platform's
+`/v1/dev/compiler-tasks` API. Never store the token. At startup, after authentication, list active
+platform tasks and reconcile them with local state by task ID, Agent ID, operation, workspace ID,
+Package hash, revision, and updated time. Platform job status wins over stale local `running` state.
+
+- If local state exists, fetch its remote task and merge newer remote job results.
+- If local state is missing, search active remote tasks for the same Agent/operation. One exact match
+  resumes automatically; multiple plausible matches require one choice.
+- Before any Package-changing stage transition, upload a clean Package checkpoint with
+  `checkpoint-package`; a new workspace may restore it with `restore-checkpoint` and verify SHA-256.
+- Continue existing Validation, Build, Eval, and Publish Job IDs instead of resubmitting them.
+- When source, Manifest, model, or lockfile hashes change, invalidate from the earliest affected stage.
+- Mark the platform task `completed` or `cancelled` at a terminal outcome.
 
 ### 1. Platform choice
 
@@ -83,13 +95,27 @@ AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" 
 
 The `models` command probes every model returned by the selected platform, removes failed models from `data`, sorts usable models by platform quality rank, and returns `recommended_model`. Unless the user explicitly names a model, requests a cost ceiling, or says to prioritize economy, always use `recommended_model`: the Plugin must never silently downgrade Agent quality to save cost. Economic tradeoffs belong to the developer. Inspect `filtered_unavailable` only for diagnostics. Use the contract's Smoke schema, Node/Eve versions, canonical model IDs, ignore rules, package limit, pricing unit, and runtime semantics. Run `model-probe <model>` once more immediately before generation and never use a model that fails.
 
-### 4. Source choice
+### 4. Intent and source choice
 
 Ask exactly:
 
-> 这次是：A. 重构已有 Agent；B. 从零发明一个 Agent？
+> 这次是：A. 更新已发布的 Agent；B. 重构已有项目；C. 从零创建 Agent？
 
-### 5A. Existing Agent inventory
+If the user already clearly requested create, update, reconstruct, or continue, do not ask again.
+Create the matching local and remote Compiler Task immediately.
+
+### 5A. Update an owned Agent
+
+Call `GET /v1/dev/packages` and `/v1/dev/packages/update-intents`; match only Packages owned by the
+validated developer identity. Exact ID continues; an exact name may continue after showing its
+summary; fuzzy or multiple matches require one choice. A missing match must ask whether the name is
+wrong or the user intended a new Agent—never silently create. Download the active immutable baseline,
+inspect the highest SemVer, verify the archive hash, and perform a three-way comparison when they
+differ. Preserve unaffected behavior and create a new immutable version. Recheck model availability,
+examples, approvals, deliverables, Knowledge Contract, Smoke, Evals, and fidelity instead of inheriting
+old claims blindly.
+
+### 5B. Existing Agent inventory
 
 Inspect before asking about anything discoverable. Inventory entrypoints, Agents, prompts, skills, tools, MCP servers, sub-agents, workflows, routing, tests, examples, dependencies, environment variables, external services, files, attachments, approvals, artefacts, retries, and failures.
 
@@ -103,9 +129,19 @@ If multiple Agents exist, ask one scope choice:
 
 Generate `.agentour/conversion-inventory.json`, `.agentour/conversion-map.json`, and `.agentour/fidelity-report.json`. Mark every capability `preserved`, `adapted`, `reimplemented`, `degraded`, `unsupported`, or `removed` only with explicit authorization.
 
-### 5B. New Agent discovery
+### 5C. New Agent discovery
 
-Create `AGENT_SPEC.md` immediately. Internally apply `agentour-brainstorm` and `agentour-grill-me`. Interview one question per turn across domain, exact job, user, error consequences, inputs, outputs, workflow, missing information, ambiguity, tools, model judgment, external systems, secrets, approvals, SOPs, edge cases, forbidden actions, runtime labels, pricing, identity, and examples.
+Create `AGENT_SPEC.md` immediately. Begin with one open invitation:
+
+> 请尽可能完整地讲讲你想做的 Agent。可以包括给谁用、解决什么问题、用户会提供什么、它要执行哪些步骤、需要连接哪些系统，以及最后交付什么；不完整也没关系，我会整理后只追问关键缺口。
+
+Extract that answer into a field-level evidence map with values, confidence, and sources:
+`user_explicit`, `source_discovered`, `platform_discovered`, `inferred`, `defaulted`, or `missing`.
+Then internally apply `agentour-brainstorm` and `agentour-grill-me`, asking exactly one question per turn
+only for unresolved high-impact gaps or conflicts. A mature first answer may require few or zero further
+questions. Keep guided one-question interviewing for vague ideas. Safe low-risk defaults do not deserve
+separate turns; approvals, side effects, truth sources, severe failure consequences, minimum input,
+completion, and deliverable acceptance must be explicit when inference would be risky.
 
 Do not implement until the spec can reproduce the intended workflow. Do not ask for a separate implementation confirmation when creation was already authorized.
 

@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import hashlib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,7 +32,7 @@ DEFAULT_IGNORES = {
     "__pycache__", ".DS_Store",
 }
 DEFAULT_PATTERNS = {"*.log", "*.tmp", "*.swp", ".agentour-*.log"}
-PLUGIN_VERSION = "0.7.0"
+PLUGIN_VERSION = "0.8.0"
 LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/Onesyn-ai/agentour-codex-plugin/main/plugins/agentour-compiler/.codex-plugin/plugin.json"
 
 
@@ -311,6 +312,76 @@ def cmd_cancel_build(args):
     print(json.dumps(result, ensure_ascii=False), flush=True)
 
 
+def cmd_compiler_tasks(args):
+    suffix = "?active=true" if args.active else "?active=false"
+    print(json.dumps(authenticated(args, "/v1/dev/compiler-tasks" + suffix),
+                     ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_create_compiler_task(args):
+    state = json.loads(args.state) if args.state else {}
+    body = {"operation": args.operation, "agent_id": args.agent_id,
+            "platform": args.platform, "workspace_id": args.workspace_id,
+            "state": state}
+    print(json.dumps(authenticated(args, "/v1/dev/compiler-tasks", method="POST", body=body),
+                     ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_update_compiler_task(args):
+    body = {"state": json.loads(args.state) if args.state else {}}
+    for key in ("stage", "status", "package_hash", "expected_revision"):
+        value = getattr(args, key, None)
+        if value is not None:
+            body[key] = value
+    task_id = urllib.parse.quote(args.task_id, safe="")
+    print(json.dumps(authenticated(args, f"/v1/dev/compiler-tasks/{task_id}",
+                                   method="PATCH", body=body),
+                     ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_checkpoint_package(args):
+    package = pathlib.Path(args.package).resolve()
+    payload, stats = package_payload(package)
+    task_id = urllib.parse.quote(args.task_id, safe="")
+    result = request(args.platform, f"/v1/dev/compiler-tasks/{task_id}/package",
+                     method="POST", data=payload, auth=True,
+                     content_type="application/gzip")
+    print(json.dumps({**result, "archive": stats,
+                      "local_sha256": hashlib.sha256(payload).hexdigest()},
+                     ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_restore_checkpoint(args):
+    task_id = urllib.parse.quote(args.task_id, safe="")
+    headers = {"Accept": "application/gzip"}
+    token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(args.platform)
+    if not token.startswith("at_"):
+        raise SystemExit(f"No saved developer token for {args.platform}")
+    headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(base_url(args.platform) +
+                                 f"/v1/dev/compiler-tasks/{task_id}/package", headers=headers)
+    destination = pathlib.Path(args.destination).resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            payload = response.read()
+            expected = response.headers.get("X-Package-SHA256", "")
+    except urllib.error.HTTPError as exc:
+        raise SystemExit(f"Agentour API {exc.code}: {exc.read().decode('utf-8', 'replace')}") from exc
+    actual = hashlib.sha256(payload).hexdigest()
+    if expected and actual != expected:
+        raise SystemExit("Checkpoint Package SHA-256 mismatch")
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+        root = destination.resolve()
+        for member in archive.getmembers():
+            target = (destination / member.name).resolve()
+            if not target.is_relative_to(root):
+                raise SystemExit("Unsafe path in checkpoint archive")
+        archive.extractall(destination)
+    print(json.dumps({"restored": True, "destination": str(destination),
+                      "sha256": actual}, ensure_ascii=False, indent=2), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", choices=PLATFORMS, default="competition")
@@ -326,7 +397,7 @@ def main():
     feedback = sub.add_parser("feedback")
     feedback.add_argument("markdown")
     feedback.add_argument("--plugin-version", default="")
-    feedback.add_argument("--operation", choices=("create", "reconstruct"), required=True)
+    feedback.add_argument("--operation", choices=("create", "reconstruct", "update"), required=True)
     feedback.add_argument("--agent-id", action="append", default=[])
     feedback.add_argument("--publish-job", default="")
     build_test = sub.add_parser("build-test")
@@ -343,6 +414,26 @@ def main():
     remote_build.add_argument("--poll-interval", type=float, default=2)
     cancel_build = sub.add_parser("cancel-build")
     cancel_build.add_argument("job_id")
+    tasks = sub.add_parser("compiler-tasks")
+    tasks.add_argument("--active", action=argparse.BooleanOptionalAction, default=True)
+    create_task = sub.add_parser("create-compiler-task")
+    create_task.add_argument("--operation", choices=("create", "reconstruct", "update"), required=True)
+    create_task.add_argument("--agent-id", default="")
+    create_task.add_argument("--workspace-id", required=True)
+    create_task.add_argument("--state", default="{}")
+    update_task = sub.add_parser("update-compiler-task")
+    update_task.add_argument("task_id")
+    update_task.add_argument("--stage")
+    update_task.add_argument("--status", choices=("active", "blocked", "completed", "cancelled"))
+    update_task.add_argument("--state", default="{}")
+    update_task.add_argument("--package-hash")
+    update_task.add_argument("--expected-revision", type=int)
+    checkpoint = sub.add_parser("checkpoint-package")
+    checkpoint.add_argument("task_id")
+    checkpoint.add_argument("package")
+    restore = sub.add_parser("restore-checkpoint")
+    restore.add_argument("task_id")
+    restore.add_argument("destination")
     for name in ("publish", "publish-async"):
         publish = sub.add_parser(name)
         publish.add_argument("package")
@@ -381,6 +472,16 @@ def main():
         cmd_remote_build(args)
     elif args.command == "cancel-build":
         cmd_cancel_build(args)
+    elif args.command == "compiler-tasks":
+        cmd_compiler_tasks(args)
+    elif args.command == "create-compiler-task":
+        cmd_create_compiler_task(args)
+    elif args.command == "update-compiler-task":
+        cmd_update_compiler_task(args)
+    elif args.command == "checkpoint-package":
+        cmd_checkpoint_package(args)
+    elif args.command == "restore-checkpoint":
+        cmd_restore_checkpoint(args)
     elif args.command == "publish":
         cmd_publish(args, False)
     else:
