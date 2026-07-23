@@ -68,6 +68,20 @@ class PluginTests(unittest.TestCase):
         manifest = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text())
         self.assertEqual(api.PLUGIN_VERSION, manifest["version"])
 
+    def test_same_marketplace_version_never_requires_restart(self):
+        api = load_api()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "version": api.PLUGIN_VERSION
+        }).encode()
+        with mock.patch.object(api.urllib.request, "urlopen", return_value=response), \
+             mock.patch.object(api.subprocess, "run") as installer:
+            result = api.check_update(auto=True)
+        self.assertFalse(result["outdated"])
+        self.assertFalse(result["updated"])
+        self.assertNotIn("restart_required", result)
+        installer.assert_not_called()
+
     def test_fixed_platform_urls(self):
         api = load_api()
         self.assertEqual(api.base_url("local"), "http://127.0.0.1:8600")
