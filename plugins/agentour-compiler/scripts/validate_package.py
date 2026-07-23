@@ -20,10 +20,19 @@ SECRET_CONTENT = [
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"]{12,}['\"]"),
 ]
-EXCLUDED = {"node_modules", ".output", ".eve", ".workflow-data", ".git", "__pycache__"}
+EXCLUDED = {"node_modules", ".output", ".eve", ".workflow-data", ".git", ".agentour", "__pycache__"}
 ALLOWED_SMOKE = {"send", "expect_tool", "expect_contains", "expect_approval", "expect_question"}
+TEMPLATE_PLACEHOLDER = re.compile(
+    r"\b(?:AGENT_ID|AGENT_NAME|AGENT_DESCRIPTION|CAPABILITY_ID|CAPABILITY_DISPLAY_NAME|"
+    r"MODEL_ID|ROLE_NAME|RESPONSIBILITY|OUTPUT_REQUIREMENTS|"
+    r"DELIVERABLE_ACCEPTANCE_CRITERIA|COMPLETE_SELF_CONTAINED_INPUT|"
+    r"INCOMPLETE_INPUT|EXPECTED_OUTPUT|EXAMPLE_[1-9]|AUTHOR_NAME|TAG_[1-9]|GREETING_TEXT)\b")
+ENV_SECRET = re.compile(r"(?:process\.env\.|process\.env\[['\"])([A-Z][A-Z0-9_]{2,})")
+PLATFORM_UNSUPPORTED_ROUTE = re.compile(
+    r"(?:AGENTOUR_URL|agentourURL|agentour\.ai)[^\n]{0,200}/v1/(?:images/generations|audio/|video/)", re.I)
+CONTEXT_DEPENDENT_SMOKE = re.compile(r"(?:上一(?:版|轮|个)|刚才|之前那个|继续(?:上次|刚才)|同上)")
 LOCK_EXCLUDES = {"node_modules", ".output", ".eve", ".workflow-data", ".git",
-                 "package.lock", "__pycache__"}
+                 ".agentour", "package.lock", "__pycache__"}
 
 
 def generate_package_lock(root: pathlib.Path) -> dict:
@@ -79,6 +88,8 @@ def validate_smoke(path: pathlib.Path) -> list[str]:
     for i, case in enumerate(cases, 1):
         if not case.get("send"): problems.append(f"Smoke case #{i} missing send")
         if len(case) < 2: problems.append(f"Smoke case #{i} needs an expect_* assertion")
+        if CONTEXT_DEPENDENT_SMOKE.search(str(case.get("send", ""))):
+            problems.append(f"Smoke case #{i} depends on missing conversation history; schema v1 cases must be self-contained")
     return problems
 
 
@@ -102,6 +113,15 @@ def main() -> int:
         critical.append("pricing.amount_credits must be an integer number of credits")
     if "amount_cents" in pricing:
         warnings.append("pricing.amount_cents is legacy; use amount_credits (credits, not RMB cents)")
+    declared_secrets = manifest.get("secrets") or []
+    if not isinstance(declared_secrets, list) or any(not isinstance(item, str) or not item.strip()
+                                                     for item in declared_secrets):
+        critical.append("manifest.secrets must be a list of environment-variable names")
+        declared_secrets = []
+    invalid_secret_names = [item for item in declared_secrets
+                            if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", item)]
+    if invalid_secret_names:
+        critical.append("Invalid manifest secret names: " + ", ".join(invalid_secret_names))
 
     try:
         package_json = json.loads((root / "payload/package.json").read_text(encoding="utf-8"))
@@ -179,22 +199,49 @@ def main() -> int:
             critical.append("manifest.examples must contain at least two complete, executable user inputs")
 
     scanned = 0
+    referenced_secrets: set[str] = set()
     for path in files(root):
         scanned += 1
         if path.stat().st_size > 2_000_000: continue
         try: text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError): continue
         rel = path.relative_to(root).as_posix()
+        if rel.startswith("payload/"):
+            referenced_secrets.update(name for name in ENV_SECRET.findall(text)
+                                      if not name.startswith("AGENTOUR_") and
+                                      re.search(r"(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)", name))
         for pattern in SECRET_CONTENT:
             if pattern.search(text): critical.append(f"Possible credential content in {rel}"); break
         if rel == "agentour.json" and FORBIDDEN_UI.search(text): critical.append("agentour.json exposes internal terminology")
+        placeholders = sorted(set(TEMPLATE_PLACEHOLDER.findall(text)))
+        if placeholders:
+            critical.append(f"Unresolved template placeholders in {rel}: {', '.join(placeholders)}")
+        if PLATFORM_UNSUPPORTED_ROUTE.search(text):
+            critical.append(f"{rel} calls an unsupported Agentour media route; use a discovered image model/tool or declare an external service")
+    platform_env = {"AGENTOUR_URL", "AGENTOUR_RUNTIME_TOKEN", "PORT", "NODE_ENV", "HOME"}
+    undeclared = sorted(referenced_secrets - set(declared_secrets) - platform_env)
+    if undeclared:
+        critical.append("Runtime environment variables used but not declared in manifest.secrets: " + ", ".join(undeclared))
+    unused = sorted(set(declared_secrets) - referenced_secrets)
+    if unused:
+        warnings.append("Manifest secrets are declared but not referenced by payload code: " + ", ".join(unused))
     smoke = root / "tests/smoke.yaml"
-    if smoke.is_file(): critical.extend(validate_smoke(smoke))
+    if smoke.is_file():
+        critical.extend(validate_smoke(smoke))
+        smoke_text = smoke.read_text(encoding="utf-8")
+        expected_tools = set(re.findall(r"(?m)^\s*expect_tool:\s*['\"]?([^'\"\s#]+)", smoke_text))
+        source_text = "\n".join(
+            path.read_text(encoding="utf-8", errors="replace") for path in files(root)
+            if path.suffix in {".ts", ".js", ".mjs", ".cjs"})
+        tool_file_names = {path.stem for path in (root / "payload/agent/tools").glob("*.*")}
+        missing_tools = sorted(tool for tool in expected_tools
+                               if tool not in tool_file_names and
+                               not re.search(rf"\b{re.escape(tool)}\b", source_text))
+        if missing_tools:
+            critical.append("Smoke expects tools not found in payload source: " + ", ".join(missing_tools))
     instructions = root / "payload/agent/instructions.md"
     content = instructions.read_text(encoding="utf-8") if instructions.is_file() else ""
     if "ask_question" not in content: warnings.append("Missing-input behavior should use Eve ask_question")
-    if "DELIVERABLE_ACCEPTANCE_CRITERIA" in content or "OUTPUT_REQUIREMENTS" in content:
-        critical.append("instructions.md still contains unresolved output or acceptance placeholders")
     if not re.search(r"(失败|error).{0,80}(不得声称成功|do not claim success|下一步)", content, re.I | re.S):
         critical.append("instructions.md must define honest tool-failure and fallback-delivery behavior")
     if manifest.get("approval_required") and "审批" not in content and "approval" not in content.lower():

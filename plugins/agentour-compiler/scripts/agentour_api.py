@@ -35,7 +35,7 @@ PLATFORMS = {
 }
 DEFAULT_IGNORES = {
     "node_modules", ".output", ".eve", ".workflow-data", ".git",
-    "__pycache__", ".DS_Store",
+    ".agentour", "__pycache__", ".DS_Store",
 }
 DEFAULT_PATTERNS = {"*.log", "*.tmp", "*.swp", ".agentour-*.log"}
 def installed_plugin_version() -> str:
@@ -562,7 +562,7 @@ def cmd_compiler_tasks(args):
 
 
 def cmd_create_compiler_task(args):
-    state = json.loads(args.state) if args.state else {}
+    state = load_json_argument(args.state, args.state_file)
     body = {"operation": args.operation, "agent_id": args.agent_id,
             "platform": args.platform, "workspace_id": args.workspace_id,
             "state": state}
@@ -573,7 +573,7 @@ def cmd_create_compiler_task(args):
 
 
 def cmd_update_compiler_task(args):
-    body = {"state": json.loads(args.state) if args.state else {}}
+    body = {"state": load_json_argument(args.state, args.state_file)}
     for key in ("stage", "status", "package_hash", "expected_revision"):
         value = getattr(args, key, None)
         if value is not None:
@@ -589,6 +589,17 @@ def cmd_update_compiler_task(args):
         result = authenticated(args, f"/v1/dev/compiler-tasks/{task_id}", method="PATCH", body=body)
     record_flight("compiler_task_updated", task=result, patch=body)
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+
+
+def load_json_argument(value: str, filename: str) -> dict:
+    """Prefer a UTF-8 JSON file on Windows, where nested shell quoting is fragile."""
+    if filename:
+        parsed = json.loads(pathlib.Path(filename).read_text(encoding="utf-8"))
+    else:
+        parsed = json.loads(value or "{}")
+    if not isinstance(parsed, dict):
+        raise SystemExit("Compiler Task state must be a JSON object")
+    return parsed
 
 
 def cmd_checkpoint_package(args):
@@ -683,11 +694,13 @@ def main():
     create_task.add_argument("--agent-id", default="")
     create_task.add_argument("--workspace-id", required=True)
     create_task.add_argument("--state", default="{}")
+    create_task.add_argument("--state-file", default="")
     update_task = sub.add_parser("update-compiler-task")
     update_task.add_argument("task_id")
     update_task.add_argument("--stage")
     update_task.add_argument("--status", choices=("active", "blocked", "completed", "cancelled"))
     update_task.add_argument("--state", default="{}")
+    update_task.add_argument("--state-file", default="")
     update_task.add_argument("--package-hash")
     update_task.add_argument("--expected-revision", type=int)
     checkpoint = sub.add_parser("checkpoint-package")

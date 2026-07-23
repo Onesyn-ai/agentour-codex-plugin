@@ -16,3 +16,8 @@ deterministic structured Gate failures before resubmitting, and use `cancel-buil
 superseded Build.
 If local polling or networking is interrupted, recover the same Job with `track-build <job-id>`.
 An observation failure is not evidence that the remote Build failed.
+
+On Windows, pass structured Compiler Task state with `--state-file <utf8-json-file>` instead of
+embedding JSON in PowerShell arguments. Before paid Build, the static validator must have checked
+that Smoke cases are self-contained, expected tools exist, all template placeholders are replaced,
+and runtime environment variables match `manifest.secrets`.
