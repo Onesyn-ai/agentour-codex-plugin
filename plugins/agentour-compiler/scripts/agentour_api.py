@@ -31,7 +31,7 @@ from flight_recorder import read as read_flight, record as record_flight, record
 
 PLATFORMS = {
     "test": {"name": "测试服", "url": "https://test.agentour.ai"},
-    "competition": {"name": "比赛服", "url": "https://agentour.ai"},
+    "production": {"name": "正式服", "url": "https://agentour.ai"},
 }
 DEFAULT_IGNORES = {
     "node_modules", ".output", ".eve", ".workflow-data", ".git",
@@ -609,7 +609,7 @@ def cmd_restore_checkpoint(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--platform", choices=PLATFORMS, default="competition")
+    parser.add_argument("--platform", choices=PLATFORMS, default="production")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("platforms")
     bootstrap = sub.add_parser("bootstrap")

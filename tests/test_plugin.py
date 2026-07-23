@@ -85,7 +85,7 @@ class PluginTests(unittest.TestCase):
     def test_fixed_platform_urls(self):
         api = load_api()
         self.assertEqual(api.base_url("test"), "https://test.agentour.ai")
-        self.assertEqual(api.base_url("competition"), "https://agentour.ai")
+        self.assertEqual(api.base_url("production"), "https://agentour.ai")
         self.assertIn("remote-build", (PLUGIN / "scripts/agentour_api.py").read_text())
         self.assertIn("compiler-tasks", (PLUGIN / "scripts/agentour_api.py").read_text())
         self.assertIn("build-preflight", (PLUGIN / "scripts/agentour_api.py").read_text())
@@ -93,7 +93,7 @@ class PluginTests(unittest.TestCase):
 
     def test_bootstrap_requires_platform_before_interview(self):
         api = load_api()
-        args = SimpleNamespace(target_platform=None, platform="competition")
+        args = SimpleNamespace(target_platform=None, platform="production")
         with mock.patch.object(api, "check_update", return_value={
                 "checked": True, "outdated": False, "updated": False}), \
              mock.patch.object(api.pathlib.Path, "is_file", return_value=False):
@@ -124,7 +124,7 @@ class PluginTests(unittest.TestCase):
 
     def test_compiler_task_commands_send_expected_contract(self):
         api = load_api()
-        args = SimpleNamespace(platform="competition", operation="update",
+        args = SimpleNamespace(platform="production", operation="update",
                                agent_id="demo", workspace_id="ws-hash",
                                state='{"stage":"discovery"}')
         with mock.patch.object(api, "authenticated", return_value={"id": "cmp_1"}) as call:
@@ -154,7 +154,7 @@ class PluginTests(unittest.TestCase):
         os.environ["AGENTOUR_TOKEN"] = "wrong"
         try:
             with self.assertRaises(SystemExit):
-                api.request("competition", "/v1/dev/me", auth=True)
+                api.request("production", "/v1/dev/me", auth=True)
         finally:
             if old is None:
                 os.environ.pop("AGENTOUR_TOKEN", None)
@@ -195,7 +195,7 @@ class PluginTests(unittest.TestCase):
 
     def test_job_poll_transport_failure_resumes_same_job(self):
         api = load_api()
-        args = SimpleNamespace(platform="competition")
+        args = SimpleNamespace(platform="production")
         with mock.patch.object(api, "authenticated", side_effect=api.APITransportError("timeout")), \
              mock.patch.object(api, "record_flight") as record:
             self.assertIsNone(api.poll_job(args, "/v1/dev/builds/bld_1", "remote_build", "bld_1"))
@@ -213,13 +213,13 @@ class PluginTests(unittest.TestCase):
             os.environ["XDG_CONFIG_HOME"] = temp
             os.environ["AGENTOUR_CREDENTIAL_BACKEND"] = "restricted-file"
             try:
-                module.set_token("local", "at_local_token_value")
-                module.set_token("competition", "at_competition_token_value")
-                self.assertEqual(module.get_token("local"), "at_local_token_value")
-                self.assertEqual(module.get_token("competition"), "at_competition_token_value")
-                module.delete_token("local")
-                self.assertEqual(module.get_token("local"), "")
-                self.assertEqual(module.get_token("competition"), "at_competition_token_value")
+                module.set_token("test", "at_test_token_value")
+                module.set_token("production", "at_production_token_value")
+                self.assertEqual(module.get_token("test"), "at_test_token_value")
+                self.assertEqual(module.get_token("production"), "at_production_token_value")
+                module.delete_token("test")
+                self.assertEqual(module.get_token("test"), "")
+                self.assertEqual(module.get_token("production"), "at_production_token_value")
             finally:
                 for key, value in old.items():
                     if value is None: os.environ.pop(key, None)
@@ -234,8 +234,8 @@ class PluginTests(unittest.TestCase):
                                           "AGENTOUR_CREDENTIAL_BACKEND": "windows-credential-manager"}), \
              mock.patch.object(module, "_ps", return_value=SimpleNamespace(
                  returncode=1, stdout="", stderr="unavailable")):
-            self.assertEqual(module.set_token("competition", "at_persistent_value"), "restricted-file")
-            self.assertEqual(module.get_token("competition"), "at_persistent_value")
+            self.assertEqual(module.set_token("production", "at_persistent_value"), "restricted-file")
+            self.assertEqual(module.get_token("production"), "at_persistent_value")
             credential = pathlib.Path(temp) / "agentour/credentials.json"
             self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
 
@@ -267,7 +267,7 @@ class PluginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             package = pathlib.Path(temp) / "demo"
             self.make_package(package)
-            args = SimpleNamespace(package=str(package), platform="competition",
+            args = SimpleNamespace(package=str(package), platform="production",
                                    no_wait=False, timeout=10, poll_interval=0)
             with mock.patch.object(api, "request", return_value={"job_id": "bld_1", "status": "queued"}), \
                  mock.patch.object(api, "authenticated", return_value={

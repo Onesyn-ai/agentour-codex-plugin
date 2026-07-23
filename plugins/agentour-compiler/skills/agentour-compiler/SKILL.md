@@ -20,7 +20,7 @@ the Agent's purpose until the command returns `ready_for_interview: true`.
 
 - `restart_required`: stop and ask for a new Thread.
 - `platform_choice_required`: ask only the fixed platform choice, then rerun with
-  `bootstrap --target-platform <local|competition>`.
+  `bootstrap --target-platform <test|production>`.
 - `token_required`: ask only for that platform's developer token, store it, then rerun the same command.
 - `blocked`: stop and report the bootstrap error.
 - `ready_for_interview`: use the returned Contract, recommended model, and active Compiler Tasks.
@@ -54,9 +54,9 @@ Every interactive turn may ask exactly one question or request exactly one choic
 | Choice | Name | URL |
 |---|---|---|
 | A | 测试服 | `https://test.agentour.ai` |
-| B | 比赛服 | `https://agentour.ai` |
+| B | 正式服 | `https://agentour.ai` |
 
-Never ask the user to type a URL. 测试服 and 比赛服 always use the fixed HTTPS URLs above.
+Never ask the user to type a URL. 测试服 and 正式服 always use the fixed HTTPS URLs above.
 
 ## Mandatory dual state machine
 
@@ -81,7 +81,7 @@ Package hash, revision, and updated time. Platform job status wins over stale lo
 
 The first unresolved question must be exactly:
 
-> 请选择发布平台：A. 测试服；B. 比赛服。
+> 请选择发布平台：A. 测试服；B. 正式服。
 
 Record the selected name and URL.
 
@@ -90,7 +90,7 @@ Record the selected name and URL.
 First inspect the selected platform's saved credential:
 
 ```bash
-python3 "${CODEX_PLUGIN_ROOT}/scripts/credential_store.py" status <local|competition>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/credential_store.py" status <test|production>
 ```
 
 If a token is stored, validate it immediately without asking the user. Only ask for a token when none is stored or the platform explicitly returns 401/403. After receiving a replacement, validate it and store it through `credential_store.py set <platform>`; the credential script automatically selects Windows Credential Manager, macOS Keychain, Linux Secret Service, WSL bridging, environment variables, or a permission-restricted fallback.
@@ -99,7 +99,7 @@ Validate immediately:
 
 ```bash
 AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> verify-token
+  --platform <test|production> verify-token
 ```
 
 - Never print, pass as a command-line argument, persist in the project, commit, or include the token in a report.
@@ -112,9 +112,9 @@ After token validation, first fetch the platform contract, then models:
 
 ```bash
 AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> contract
+  --platform <test|production> contract
 AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> models
+  --platform <test|production> models
 ```
 
 The `models` command probes every model returned by the selected platform, removes failed models from `data`, sorts usable models by platform quality rank, and returns `recommended_model`. Unless the user explicitly names a model, requests a cost ceiling, or says to prioritize economy, always use `recommended_model`: the Plugin must never silently downgrade Agent quality to save cost. Economic tradeoffs belong to the developer. Inspect `filtered_unavailable` only for diagnostics. Use the contract's Smoke schema, Node/Eve versions, canonical model IDs, ignore rules, package limit, pricing unit, and runtime semantics. Run `model-probe <model>` once more immediately before generation and never use a model that fails.
@@ -209,7 +209,7 @@ Static validation is not sufficient. Before asking visibility or publishing, eve
 
 ```bash
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" build-test packages/<agent-id>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <local|competition> \
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   validate-package packages/<agent-id>
 ```
 
@@ -243,9 +243,9 @@ If it is not ready, preserve the task and Package checkpoint and wait; do not en
 
 ```bash
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> build-preflight
+  --platform <test|production> build-preflight
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> remote-build packages/<agent-id>
+  --platform <test|production> remote-build packages/<agent-id>
 ```
 
 Use the structured `gates` result to repair deterministic failures. Do not retry unchanged content blindly; retry only after a repair or for the single transient retry handled by the platform. Publish only when the remote Build status is `succeeded`.
@@ -259,7 +259,7 @@ If polling is interrupted or the local command times out, resume that exact paid
 
 ```bash
 AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> publish-async packages/<agent-id> \
+  --platform <test|production> publish-async packages/<agent-id> \
   --visibility <private|public>
 ```
 
@@ -278,7 +278,7 @@ Upload it with the same validated token to the selected platform:
 
 ```bash
 AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <local|competition> feedback "<readable-run-report>.md" \
+  --platform <test|production> feedback "<readable-run-report>.md" \
   --plugin-version "<installed manifest version>" --operation <create|reconstruct|update> \
   --agent-id <agent-id> --publish-job <job-id>
 ```

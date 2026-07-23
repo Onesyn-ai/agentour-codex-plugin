@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 SERVICE = "agentour-compiler"
-PLATFORMS = {"local", "competition"}
+PLATFORMS = {"test", "production"}
 
 
 def _check(platform: str) -> str:
