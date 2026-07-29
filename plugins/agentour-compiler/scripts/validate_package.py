@@ -33,6 +33,18 @@ PLATFORM_UNSUPPORTED_ROUTE = re.compile(
 CONTEXT_DEPENDENT_SMOKE = re.compile(r"(?:上一(?:版|轮|个)|刚才|之前那个|继续(?:上次|刚才)|同上)")
 LOCK_EXCLUDES = {"node_modules", ".output", ".eve", ".workflow-data", ".git",
                  ".agentour", "package.lock", "__pycache__"}
+FEISHU_SKILLS = {
+    "lark-approval", "lark-apps", "lark-attendance", "lark-base", "lark-calendar",
+    "lark-contact", "lark-doc", "lark-drive", "lark-event", "lark-im", "lark-mail",
+    "lark-markdown", "lark-minutes", "lark-note", "lark-okr", "lark-openapi-explorer",
+    "lark-shared", "lark-sheets", "lark-skill-maker", "lark-slides", "lark-task",
+    "lark-vc", "lark-vc-agent", "lark-whiteboard", "lark-wiki",
+    "lark-workflow-meeting-summary", "lark-workflow-standup-report",
+}
+RESERVED_FEISHU_SECRETS = {"FEISHU_APP_ID", "FEISHU_APP_SECRET"}
+DIRECT_FEISHU_CLIENT = re.compile(
+    r"(?:process\.env\.(?:FEISHU_APP_ID|FEISHU_APP_SECRET)|"
+    r"open\.feishu\.cn/open-apis)", re.I)
 
 
 def generate_package_lock(root: pathlib.Path) -> dict:
@@ -122,6 +134,29 @@ def main() -> int:
                             if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", item)]
     if invalid_secret_names:
         critical.append("Invalid manifest secret names: " + ", ".join(invalid_secret_names))
+    reserved_feishu=sorted(set(declared_secrets) & RESERVED_FEISHU_SECRETS)
+    if reserved_feishu:
+        critical.append("Agentour owns Feishu application credentials; remove from manifest.secrets: "
+                        + ", ".join(reserved_feishu))
+    channels=manifest.get("channel_capabilities") or {}
+    feishu=channels.get("feishu") if isinstance(channels,dict) else None
+    feishu_skills=[]
+    if feishu is not None:
+        if not isinstance(feishu,dict):
+            critical.append("channel_capabilities.feishu must be an object")
+        else:
+            if feishu.get("required") not in {True,False}:
+                critical.append("channel_capabilities.feishu.required must be boolean")
+            feishu_skills=feishu.get("skills") or []
+            if (not isinstance(feishu_skills,list) or not feishu_skills
+                    or any(not isinstance(item,str) for item in feishu_skills)):
+                critical.append("channel_capabilities.feishu.skills must be a non-empty string list")
+                feishu_skills=[]
+            else:
+                invalid=sorted(set(feishu_skills)-FEISHU_SKILLS)
+                if invalid:critical.append("Unknown official Feishu Skills: " + ", ".join(invalid))
+                if len(feishu_skills)!=len(set(feishu_skills)):
+                    critical.append("channel_capabilities.feishu.skills must not contain duplicates")
 
     try:
         package_json = json.loads((root / "payload/package.json").read_text(encoding="utf-8"))
@@ -206,6 +241,8 @@ def main() -> int:
         try: text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError): continue
         rel = path.relative_to(root).as_posix()
+        if rel.startswith("payload/") and DIRECT_FEISHU_CLIENT.search(text):
+            critical.append(f"{rel} bypasses Agentour Feishu OAuth/CLI injection")
         if rel.startswith("payload/"):
             referenced_secrets.update(name for name in ENV_SECRET.findall(text)
                                       if not name.startswith("AGENTOUR_") and
@@ -241,6 +278,16 @@ def main() -> int:
             critical.append("Smoke expects tools not found in payload source: " + ", ".join(missing_tools))
     instructions = root / "payload/agent/instructions.md"
     content = instructions.read_text(encoding="utf-8") if instructions.is_file() else ""
+    if feishu_skills:
+        if "load_skill" not in content or "lark-cli" not in content:
+            critical.append("Feishu instructions must load declared Skills and use Runtime lark-cli")
+        missing_instruction_skills=[item for item in feishu_skills if item not in content]
+        if missing_instruction_skills:
+            critical.append("Feishu instructions do not name declared Skills: "
+                            + ", ".join(missing_instruction_skills))
+        readme=(root/"README.md").read_text(encoding="utf-8",errors="replace") if (root/"README.md").is_file() else ""
+        if not re.search(r"(?:飞书|Feishu|Lark).{0,100}(?:授权|authorize|grant)",readme,re.I|re.S):
+            critical.append("README must explain Feishu account authorization and per-Agent grant")
     if "ask_question" not in content: warnings.append("Missing-input behavior should use Eve ask_question")
     if not re.search(r"(失败|error).{0,80}(不得声称成功|do not claim success|下一步)", content, re.I | re.S):
         critical.append("instructions.md must define honest tool-failure and fallback-delivery behavior")

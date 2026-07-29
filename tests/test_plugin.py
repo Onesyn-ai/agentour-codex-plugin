@@ -123,6 +123,38 @@ class PluginTests(unittest.TestCase):
         self.assertIn("checkpoint-package", skill)
         self.assertIn("Mandatory reference-material gate", skill)
         self.assertIn("upload-references", skill)
+        self.assertIn("Mandatory Feishu channel capability gate", skill)
+        self.assertIn("channel_capabilities.feishu.skills", skill)
+        self.assertIn("short-lived user credential", skill)
+        reference = PLUGIN / "skills/agentour-compiler/references/feishu-capabilities.md"
+        self.assertTrue(reference.is_file())
+        self.assertIn("lark-task", reference.read_text(encoding="utf-8"))
+
+    def test_validator_enforces_agentour_managed_feishu_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            manifest_path=package/"agentour.json"
+            manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["channel_capabilities"]={"feishu": {
+                "required": True, "skills": ["lark-doc"]}}
+            manifest_path.write_text(json.dumps(manifest,ensure_ascii=False),encoding="utf-8")
+            (package/"README.md").write_text(
+                "# Demo\n使用前请在 Agentour 渠道中完成飞书授权并允许此 Agent。\n",
+                encoding="utf-8")
+            with (package/"payload/agent/instructions.md").open("a",encoding="utf-8") as file:
+                file.write("\n飞书操作先调用 load_skill 读取 lark-doc，再按说明使用 lark-cli。\n")
+            validator=PLUGIN/"scripts/validate_package.py"
+            accepted=subprocess.run([sys.executable,str(validator),str(package)],
+                                    capture_output=True,text=True)
+            self.assertEqual(accepted.returncode,0,accepted.stdout+accepted.stderr)
+
+            manifest["secrets"]=["FEISHU_APP_ID","FEISHU_APP_SECRET"]
+            manifest_path.write_text(json.dumps(manifest,ensure_ascii=False),encoding="utf-8")
+            rejected=subprocess.run([sys.executable,str(validator),str(package)],
+                                    capture_output=True,text=True)
+            self.assertNotEqual(rejected.returncode,0)
+            self.assertIn("Agentour owns Feishu application credentials",rejected.stdout)
 
     def test_reference_upload_uses_developer_knowledge_endpoints(self):
         api = load_api()

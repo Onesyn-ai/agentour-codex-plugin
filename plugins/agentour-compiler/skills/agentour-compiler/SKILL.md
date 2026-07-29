@@ -197,6 +197,30 @@ For changing or live data, prefer a read-only connector/MCP source instead of ta
 snapshot. Record the user's decision and uploaded source IDs in compiler state so resumed runs do not ask
 again or upload duplicates.
 
+### Mandatory Feishu channel capability gate
+
+When an Agent needs to read or change Feishu/Lark resources, read
+`references/feishu-capabilities.md` completely before generating or modifying Package files.
+
+- Treat Feishu as an Agentour-managed Channel Runtime capability. Never package OAuth tokens, the
+  official CLI, official Skills, `FEISHU_APP_ID`, or `FEISHU_APP_SECRET`.
+- Select the smallest official `lark-*` Skill set and declare it in
+  `agentour.json.channel_capabilities.feishu.skills`. Set `required=true` when the Agent cannot fulfil
+  its primary purpose without Feishu; otherwise use `false`.
+- Instructions must load each declared Skill with Eve `load_skill` and follow that Skill's `lark-cli`
+  contract. Do not guess CLI arguments, implement a private Feishu OpenAPI client, or ask any user to
+  paste a token or application secret.
+- The Package does not retrieve the long-lived credential. Agentour keeps the refresh token in its
+  encrypted credential store and injects a short-lived user credential into the isolated Runtime only
+  when the account has an active Feishu authorization and has granted this Agent access.
+- The same account authorization may be used from authenticated Web and SDK entry points. A Feishu
+  channel launch uses the sender's identity. Anonymous shares must never inherit the owner's Feishu
+  credential.
+- README must explain the prerequisite: authorize Feishu under Agentour's Channels page and enable this
+  Agent. Missing authorization must produce an honest actionable failure, never a fabricated result.
+- Smoke Tests verify Skill selection and failure handling without mutating the developer's real Feishu
+  data; platform integration tests own OAuth, Scope, ACL, and real-resource coverage.
+
 ## Package generation
 
 Create each Package under `packages/<agent-id>/` from bundled templates with `agentour.json`, `README.md`, `RELEASE.md`, `tests/smoke.yaml`, and a complete `payload/` Eve project.
