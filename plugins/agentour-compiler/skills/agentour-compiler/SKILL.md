@@ -25,6 +25,11 @@ the Agent's purpose until the command returns `ready_for_interview: true`.
 - `blocked`: stop and report the bootstrap error.
 - `ready_for_interview`: use the returned Contract, recommended model, and active Compiler Tasks.
 
+Bootstrap also returns `accepted_fix_tasks`. If the current user request addresses one of those tasks,
+claim that exact task before editing and retain its `task_id`. Do not silently substitute an unrelated
+feedback task for the user's request. When a requested Agent update matches accepted user feedback,
+show the linkage briefly and treat the source feedback as an acceptance requirement.
+
 The bootstrap transcript is the audit proof that update, identity, Contract, model probes and recovery
 checks ran. Absence of this command means the workflow has not started correctly.
 
@@ -348,3 +353,26 @@ AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" 
 For a blocked terminal run, use the best available Compiler Task, Validation, Build, or Publish Job ID
 as `--publish-job`. Report the feedback ID to the user. Terminal feedback upload is required, not an
 optional suggestion.
+
+## Required optimization deposit for feedback-driven work
+
+When this run claimed or was explicitly linked to an accepted Agentour feedback task, terminal flight
+feedback is not enough. After implementation and verification, write a JSON result containing all of:
+
+- `analysis`: the evidence-backed defect or optimization analysis;
+- `summary`: the user-readable outcome;
+- `changes`: concrete changed files/contracts/behaviors, not generic claims;
+- `evidence`: tests, Jobs, before/after observations, and remaining limitations;
+- `commits`: pushed commit SHAs when available.
+
+Then complete the task through the platform API. This call automatically creates the durable
+“优化沉淀” record visible beside platform and developer feedback:
+
+```bash
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  complete-fix <fix-task-id> --result <fix-result.json>
+```
+
+Do not mark a task complete before the verification evidence exists. A retry of the same result is
+idempotent. If verification fails, keep working; never submit an empty “已优化” statement. The Plugin
+must report the returned improvement ID in its final response.

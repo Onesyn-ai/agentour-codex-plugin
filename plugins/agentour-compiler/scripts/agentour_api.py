@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 import time
 import hashlib
+import gc
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -292,6 +293,7 @@ def cmd_bootstrap(args):
         contract = authenticated(args, "/v1/dev/compiler-contract")
         models = discover_models(args)
         tasks = authenticated(args, "/v1/dev/compiler-tasks?active=true")
+        fix_tasks = authenticated(args, "/v1/dev/fix-tasks?limit=200")
     except SystemExit as exc:
         result.update({"platform": platform, "blocked": True, "error": str(exc)})
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
@@ -303,6 +305,8 @@ def cmd_bootstrap(args):
         "contract": contract,
         "models": models,
         "active_compiler_tasks": tasks,
+        "accepted_fix_tasks": [item for item in fix_tasks
+                               if item.get("status") in {"accepted", "claimed", "fixing"}],
         "ready_for_interview": bool(models.get("recommended_model")),
     })
     record_flight("bootstrap_completed", platform=platform,
@@ -431,17 +435,24 @@ def cmd_build_test(args):
                 raise SystemExit(f"{' '.join(command)} failed:\n{(result.stdout + result.stderr)[-4000:]}")
     finally:
         import shutil
-        for attempt in range(4):
+        gc.collect()
+        def make_writable(_function, path, _exc_info):
             try:
-                shutil.rmtree(td)
+                os.chmod(path, 0o700)
+            except OSError:
+                pass
+        for attempt in range(10):
+            try:
+                shutil.rmtree(td, onerror=make_writable)
                 break
             except FileNotFoundError:
                 break
             except OSError as exc:
-                if attempt == 3:
+                if attempt == 9:
                     record_flight("temporary_directory_cleanup_failed", path=td, error=str(exc))
                 else:
-                    time.sleep(0.2 * (attempt + 1))
+                    gc.collect()
+                    time.sleep(min(2.0, 0.15 * (2 ** attempt)))
     record_flight("local_build_completed", package=str(package),
                   duration_seconds=round(time.time() - started_at, 3))
     print(json.dumps({"ok": True, "package": str(package),
@@ -668,6 +679,25 @@ def cmd_upload_references(args):
     print(json.dumps({"uploaded":uploaded,"assets":result.get("assets",[])},ensure_ascii=False,indent=2))
 
 
+def cmd_complete_fix(args):
+    payload_path = pathlib.Path(args.result).expanduser().resolve()
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    if not str(payload.get("analysis") or "").strip() or not str(payload.get("summary") or "").strip():
+        raise SystemExit("Fix result must include non-empty analysis and summary")
+    payload.setdefault("changes", [])
+    payload.setdefault("evidence", {})
+    payload.setdefault("commits", [])
+    payload["plugin"] = "codex"
+    payload["plugin_version"] = PLUGIN_VERSION
+    task_id = urllib.parse.quote(args.task_id, safe="")
+    result = authenticated(args, f"/v1/dev/fix-tasks/{task_id}/complete",
+                           method="POST", body={"status": "verification", "payload": payload})
+    record_flight("fix_task_completed", task_id=args.task_id,
+                  improvement_id=(result.get("improvement") or {}).get("id"),
+                  summary=payload["summary"], commits=payload["commits"])
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", choices=PLATFORMS, default="production")
@@ -733,6 +763,14 @@ def main():
     references.add_argument("files",nargs="+")
     resolve_update = sub.add_parser("resolve-update-intent")
     resolve_update.add_argument("target")
+    fix_tasks = sub.add_parser("fix-tasks")
+    fix_tasks.add_argument("--kind", choices=("platform", "agent", "plugin"), default="")
+    claim_fix = sub.add_parser("claim-fix")
+    claim_fix.add_argument("task_id")
+    claim_fix.add_argument("--lease-seconds", type=int, default=1800)
+    complete_fix = sub.add_parser("complete-fix")
+    complete_fix.add_argument("task_id")
+    complete_fix.add_argument("--result", required=True)
     for name in ("publish", "publish-async"):
         publish = sub.add_parser(name)
         publish.add_argument("package")
@@ -801,6 +839,16 @@ def main():
         print(json.dumps(authenticated(args, "/v1/dev/packages/update-intents", method="POST",
                                        body={"target": args.target}),
                          ensure_ascii=False, indent=2))
+    elif args.command == "fix-tasks":
+        query = urllib.parse.urlencode({"kind": args.kind}) if args.kind else ""
+        print(json.dumps(authenticated(args, f"/v1/dev/fix-tasks{f'?{query}' if query else ''}"),
+                         ensure_ascii=False, indent=2))
+    elif args.command == "claim-fix":
+        task_id = urllib.parse.quote(args.task_id, safe="")
+        print(json.dumps(authenticated(args, f"/v1/dev/fix-tasks/{task_id}/claim",
+            method="POST", body={"lease_seconds": args.lease_seconds}), ensure_ascii=False, indent=2))
+    elif args.command == "complete-fix":
+        cmd_complete_fix(args)
     elif args.command == "publish":
         cmd_publish(args, False)
     else:

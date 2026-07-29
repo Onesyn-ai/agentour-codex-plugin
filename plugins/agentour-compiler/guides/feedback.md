@@ -127,3 +127,11 @@ Only when no permitted action can advance the run, upload the detailed blocker v
 must state `未完成`, section 16 must state that no success evidence exists, and all available failed
 Job evidence must remain present. The final user response reports the readable report filename,
 feedback ID, final Validation/Build/Publish IDs, and total observed duration.
+
+## Optimization deposits are separate from flight records
+
+The 18-section Markdown explains what happened during a Compiler run. When work is driven by an
+accepted feedback/fix task, also submit a structured optimization deposit after verification. It is
+the durable answer to “what did we learn and what changed?” and must include analysis, summary,
+concrete changes, verification evidence, and commit IDs. Use `agentour_api.py complete-fix`; the Plugin
+must not ask a user to copy this data into the platform manually.
