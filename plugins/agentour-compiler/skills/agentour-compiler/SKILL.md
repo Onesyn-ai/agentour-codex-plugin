@@ -207,6 +207,21 @@ again or upload duplicates.
 When an Agent needs to read or change Feishu/Lark resources, read
 `references/feishu-capabilities.md` completely before generating or modifying Package files.
 
+Before touching Package files, run the strict official CLI preflight with the exact Skills the Agent
+will need:
+
+```bash
+python3 "${CODEX_PLUGIN_ROOT}/scripts/lark_cli_preflight.py" \
+  --skills lark-contact lark-task lark-base
+```
+
+This gate must confirm that the installed `lark-cli`, GitHub's latest `larksuite/cli` Release, and npm's
+latest `@larksuite/cli` version are identical. It automatically invokes the official installer when the
+CLI is absent or behind, verifies the bundled Skills, and reads each selected official Skill contract.
+If GitHub or npm cannot be reached, their versions disagree, the upgrade does not converge, or a Skill
+cannot be read, stop Feishu Agent generation. A cached version or remembered CLI syntax is not enough
+to claim that development used the latest official contract.
+
 - Treat Feishu as an Agentour-managed Channel Runtime capability. Never package OAuth tokens, the
   official CLI, official Skills, `FEISHU_APP_ID`, or `FEISHU_APP_SECRET`.
 - Select the smallest official `lark-*` Skill set and declare it in
@@ -230,6 +245,11 @@ When an Agent needs to read or change Feishu/Lark resources, read
 
 Create each Package under `packages/<agent-id>/` from bundled templates with `agentour.json`, `README.md`, `RELEASE.md`, `tests/smoke.yaml`, and a complete `payload/` Eve project.
 
+Agentour currently supports E2B Runtime only. Do not create `payload/agent/sandbox.ts` or
+`payload/agent/sandbox/sandbox.ts`. The platform injects its audited single-layer `agentour-e2b`
+adapter into a disposable Package copy during Remote Build. A Package-authored Eve sandbox creates a
+second execution boundary and must fail validation instead of being silently composed or overwritten.
+
 Follow the fetched Compiler Contract literally. For Contract v4 and later: put behavioral instructions
 in `payload/agent/instructions.md` (never `defineAgent.system`), do not throw for missing Runtime
 credentials during module import/build, pin every direct dependency to an exact version, never use
@@ -249,6 +269,11 @@ for explicit transient failures, and a useful fallback deliverable. Do not leave
 - Price in **积分** using `pricing.amount_credits`; never describe it as RMB cents.
 - Use Smoke `schema_version: 1` and only `send`, `expect_tool`, `expect_contains`, `expect_approval`, and `expect_question`.
 - Missing required input must use Eve `ask_question`, producing `input_requested`.
+- Every Agent must define its minimum required input, a remaining-gap list, and terminal completion
+  conditions. After each answer, recompute all remaining gaps and ask exactly the next highest-priority
+  missing item. While required input is missing, it must not emit a final deliverable or mark the run
+  completed. Only successful completion, a non-recoverable failure with an actionable explanation, or
+  explicit user cancellation may end the run. `input_requested` is neither success nor failure.
 - Check Node and pnpm before dependency work. Require Node 24; never compile Node from source.
 - Generate the lockfile with `pnpm install --lockfile-only`. Do not install `node_modules` in the project merely to create the lock.
 - If a local build is needed, use a Linux temporary copy or the platform-compatible container helper, then delete the temporary build directory.

@@ -112,9 +112,19 @@ def main() -> int:
     critical: list[str] = []; warnings: list[str] = []; passed: list[str] = []
     required = ["agentour.json", "README.md", "RELEASE.md", "tests/smoke.yaml",
                 "payload/package.json", "payload/pnpm-lock.yaml", "payload/agent/agent.ts",
-                "payload/agent/instructions.md", "payload/agent/sandbox/sandbox.ts"]
+                "payload/agent/instructions.md"]
     missing = [item for item in required if not (root / item).is_file()]
     critical.extend("Missing file: " + item for item in missing)
+    agent_root = root / "payload/agent"
+    authored_sandboxes = sorted(
+        path for path in agent_root.rglob("sandbox.ts") if path.is_file()
+    ) if agent_root.is_dir() else []
+    if authored_sandboxes:
+        critical.append(
+            "E2B Packages must not author sandbox.ts; Agentour injects the single-layer "
+            "agentour-e2b adapter at build time: "
+            + ", ".join(path.relative_to(root).as_posix() for path in authored_sandboxes)
+        )
 
     try: manifest = json.loads((root / "agentour.json").read_text(encoding="utf-8"))
     except Exception as exc: manifest = {}; critical.append(f"Invalid agentour.json: {exc}")
@@ -288,7 +298,17 @@ def main() -> int:
         readme=(root/"README.md").read_text(encoding="utf-8",errors="replace") if (root/"README.md").is_file() else ""
         if not re.search(r"(?:飞书|Feishu|Lark).{0,100}(?:授权|authorize|grant)",readme,re.I|re.S):
             critical.append("README must explain Feishu account authorization and per-Agent grant")
-    if "ask_question" not in content: warnings.append("Missing-input behavior should use Eve ask_question")
+    if int(manifest.get("compiler_contract_version", 0) or 0) >= 4:
+        missing_input_contract = {
+            "ask_question": r"ask_question",
+            "input_requested": r"input_requested",
+            "remaining-gap recomputation": r"(?:剩余缺口|重新检查|recompute.{0,30}(?:gap|missing))",
+            "must not complete while input is missing": r"(?:不得|不能|must not).{0,40}(?:标记完成|最终交付|complete|final deliverable)",
+            "explicit cancellation terminal": r"(?:用户明确取消|explicit user cancellation|user explicitly cancels)",
+        }
+        for label, pattern in missing_input_contract.items():
+            if not re.search(pattern, content, re.I | re.S):
+                critical.append(f"instructions.md missing required-input state-machine rule: {label}")
     if not re.search(r"(失败|error).{0,80}(不得声称成功|do not claim success|下一步)", content, re.I | re.S):
         critical.append("instructions.md must define honest tool-failure and fallback-delivery behavior")
     if manifest.get("approval_required") and "审批" not in content and "approval" not in content.lower():

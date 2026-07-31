@@ -4,6 +4,18 @@ Use this catalog whenever an Agent needs to read or change Feishu/Lark resources
 minimum necessary Skills. Do not copy Skill content, `lark-cli`, application credentials, or user tokens
 into the Package.
 
+## Development-time latest-version gate
+
+Before generating or modifying a Feishu Package, run `scripts/lark_cli_preflight.py --skills ...` with
+the exact declared business Skills. The preflight must prove that all three versions match: the local
+`lark-cli`, the latest GitHub Release from `larksuite/cli`, and npm latest for `@larksuite/cli`. It must
+also successfully run `lark-cli skills list` and `lark-cli skills read <skill>` for every selected Skill.
+Failure to reach either official registry, mismatched latest versions, an unsuccessful upgrade, or an
+unreadable Skill is a blocking error. Do not generate from stale cached knowledge or guess commands.
+
+This is a Compiler development prerequisite only. The Package must not bundle the CLI or Skills.
+Agentour Runtime injects its platform-verified CLI/Skill bundle and scoped user authorization.
+
 ## Credential boundary
 
 The developer only declares capabilities. The end user authorizes their Feishu account in Agentour and

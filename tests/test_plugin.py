@@ -26,6 +26,15 @@ def load_api():
     return module
 
 
+def load_lark_preflight():
+    path = PLUGIN / "scripts" / "lark_cli_preflight.py"
+    spec = importlib.util.spec_from_file_location("lark_cli_preflight", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
 class PluginTests(unittest.TestCase):
     def make_package(self, root: pathlib.Path):
         files = {
@@ -36,8 +45,12 @@ class PluginTests(unittest.TestCase):
             "payload/pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
             "payload/pnpm-workspace.yaml": "packages:\n  - '.'\nminimumReleaseAge: 1440\nallowBuilds: {}\n",
             "payload/agent/agent.ts": "const url = process.env.AGENTOUR_URL;\n",
-            "payload/agent/instructions.md": "# Demo\n缺少信息时调用 ask_question。工具失败时不得声称成功，并说明下一步。\n",
-            "payload/agent/sandbox/sandbox.ts": "export default {};\n",
+            "payload/agent/instructions.md": (
+                "# Demo\n缺少信息时调用 ask_question，使会话进入 input_requested。"
+                "用户补充后重新检查剩余缺口，继续询问下一项；缺信息时不得标记完成或输出最终交付物。"
+                "只有任务成功、无法继续的明确失败或用户明确取消才能结束。"
+                "工具失败时不得声称成功，并说明下一步。\n"
+            ),
         }
         manifest = {
             "compiler_contract_version": 4,
@@ -126,9 +139,60 @@ class PluginTests(unittest.TestCase):
         self.assertIn("Mandatory Feishu channel capability gate", skill)
         self.assertIn("channel_capabilities.feishu.skills", skill)
         self.assertIn("short-lived user credential", skill)
+        self.assertIn("lark_cli_preflight.py", skill)
+        self.assertIn("GitHub's latest", skill)
         reference = PLUGIN / "skills/agentour-compiler/references/feishu-capabilities.md"
         self.assertTrue(reference.is_file())
         self.assertIn("lark-task", reference.read_text(encoding="utf-8"))
+
+    def test_lark_cli_preflight_accepts_only_matching_latest_versions(self):
+        preflight = load_lark_preflight()
+        with mock.patch.object(preflight, "github_latest", return_value="1.0.80"), \
+             mock.patch.object(preflight, "npm_latest", return_value="1.0.80"), \
+             mock.patch.object(preflight, "installed_version", return_value="1.0.80"), \
+             mock.patch.object(preflight, "install_latest") as install, \
+             mock.patch.object(preflight, "verify_skills", return_value=(
+                 ["lark-task"], {"lark-task": "official contract"})):
+            result = preflight.preflight(["lark-task"])
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["skill_contracts"]["lark-task"], "official contract")
+        install.assert_not_called()
+
+    def test_lark_cli_preflight_upgrades_missing_or_stale_cli(self):
+        preflight = load_lark_preflight()
+        with mock.patch.object(preflight, "github_latest", return_value="1.0.80"), \
+             mock.patch.object(preflight, "npm_latest", return_value="1.0.80"), \
+             mock.patch.object(preflight, "installed_version", side_effect=["1.0.79", "1.0.80"]), \
+             mock.patch.object(preflight, "install_latest") as install, \
+             mock.patch.object(preflight, "verify_skills", return_value=([], {})):
+            result = preflight.preflight([])
+        self.assertTrue(result["ready"])
+        self.assertTrue(result["upgraded"])
+        install.assert_called_once()
+
+    def test_lark_cli_preflight_blocks_unverifiable_latest_version(self):
+        preflight = load_lark_preflight()
+        with mock.patch.object(preflight, "github_latest", return_value="1.0.80"), \
+             mock.patch.object(preflight, "npm_latest", return_value="1.0.81"), \
+             mock.patch.object(preflight, "install_latest") as install:
+            result = preflight.preflight(["lark-task"])
+        self.assertFalse(result["ready"])
+        self.assertIn("disagree", result["error"])
+        install.assert_not_called()
+
+    def test_validator_rejects_agent_that_ends_on_missing_input(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            (package / "payload/agent/instructions.md").write_text(
+                "# Demo\n缺少信息调用 ask_question。工具失败时不得声称成功，并说明下一步。\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run([
+                sys.executable, str(PLUGIN / "scripts/validate_package.py"), str(package)
+            ], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required-input state-machine", result.stdout)
 
     def test_validator_enforces_agentour_managed_feishu_credentials(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -200,6 +264,22 @@ class PluginTests(unittest.TestCase):
         workspace = (PLUGIN / "templates/pnpm-workspace.yaml").read_text(encoding="utf-8")
         self.assertIn("allowBuilds:", workspace)
         self.assertIn("minimumReleaseAge: 1440", workspace)
+        self.assertFalse((PLUGIN / "templates/sandbox.ts").exists())
+        skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("single-layer `agentour-e2b`", skill)
+
+    def test_validator_rejects_package_authored_sandbox(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            sandbox = package / "payload/agent/sandbox/sandbox.ts"
+            sandbox.parent.mkdir(parents=True)
+            sandbox.write_text("export default {};\n", encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(PLUGIN / "scripts/validate_package.py"), str(package)
+            ], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not author sandbox.ts", result.stdout)
 
     def test_token_requires_at_prefix(self):
         api = load_api()

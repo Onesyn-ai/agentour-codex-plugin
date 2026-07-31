@@ -1,6 +1,6 @@
 {
   "name": "agentour-compiler",
-  "version": "0.8.6+codex.20260729100216",
+  "version": "0.8.6+codex.20260731114104",
   "description": "Create, update or reconstruct Agentour Agents with adaptive discovery, durable checkpoints, validation, fidelity tests and publishing.",
   "author": {
     "name": "Agentour Platform",
