@@ -176,6 +176,29 @@ completion, and deliverable acceptance must be explicit when inference would be 
 
 Do not implement until the spec can reproduce the intended workflow. Do not ask for a separate implementation confirmation when creation was already authorized.
 
+### Mandatory interaction and approval policy choices
+
+Before generating or modifying Package files, ask exactly one interaction choice unless the user has
+already answered it explicitly:
+
+> 这个 Agent 收到消息后应该：A. 自动理解合理缺省并直接执行到最终结果；B. 持续追问，直到所有必要信息清晰后再执行（默认）？
+
+Record `interaction_policy.execution_mode` as `auto_execute` or `clarify_until_ready` in AGENT_SPEC,
+Compiler Task, and manifest. Default to `clarify_until_ready`. For `auto_execute`, specify safe defaults,
+ordinary ambiguities that must not trigger questions, and hard boundaries where the Agent must fail
+honestly instead of inventing identities, resource IDs, amounts, or irreversible targets.
+
+If the Agent has send/write/payment/delete/permission side effects, ask exactly one separate choice:
+
+> 危险操作应该：A. 每次执行前审批（默认）；B. 按已确认的 Agent 规则直接执行，不逐次审批？
+
+Record `interaction_policy.dangerous_action_approval` as `always` or `none`. Default to `always`.
+When the user explicitly selects `none`, approval tools may be omitted and `approval_required=[]`, but
+instructions, README, examples, and Smoke must define the automatic write scope, idempotency, partial
+failure behavior, evidence, and non-automatable high-risk boundary. Recommend approval for payment,
+deletion, and permission expansion, but honor an explicit no-approval choice. Never combine these two
+policy questions in one turn.
+
 ### Mandatory reference-material gate
 
 Before generating or modifying Package files, explicitly resolve whether the Agent depends on the
@@ -268,16 +291,40 @@ for explicit transient failures, and a useful fallback deliverable. Do not leave
 
 - Price in **积分** using `pricing.amount_credits`; never describe it as RMB cents.
 - Use Smoke `schema_version: 1` and only `send`, `expect_tool`, `expect_contains`, `expect_approval`, and `expect_question`.
-- Missing required input must use Eve `ask_question`, producing `input_requested`.
-- Every Agent must define its minimum required input, a remaining-gap list, and terminal completion
+- With `clarify_until_ready`, missing required input must use Eve `ask_question`, producing `input_requested`.
+- Every `clarify_until_ready` Agent must define its minimum required input, a remaining-gap list, and terminal completion
   conditions. After each answer, recompute all remaining gaps and ask exactly the next highest-priority
   missing item. While required input is missing, it must not emit a final deliverable or mark the run
   completed. Only successful completion, a non-recoverable failure with an actionable explanation, or
   explicit user cancellation may end the run. `input_requested` is neither success nor failure.
+- Every `auto_execute` Agent must define safe defaults, avoid ordinary follow-up questions, disclose
+  defaults in the final result, and fail honestly only when the minimum executable target cannot be
+  resolved. It must not contain a hidden `ask_question` path that contradicts the selected policy.
 - Check Node and pnpm before dependency work. Require Node 24; never compile Node from source.
 - Generate the lockfile with `pnpm install --lockfile-only`. Do not install `node_modules` in the project merely to create the lock.
 - If a local build is needed, use a Linux temporary copy or the platform-compatible container helper, then delete the temporary build directory.
 - Maintain `.agentour/compiler-state.json` with contract version, publish jobs, failed Gates, repairs, and results; never include tokens.
+
+### Mandatory runtime-efficiency contract
+
+Runtime efficiency is part of correctness for every generated or updated Agent:
+
+- Plan the complete turn once before repetitive execution; never ask the model to re-plan after every item.
+- Load each Skill, schema, configuration, and resource structure at most once per Session and reuse it.
+- Parallelize independent reads; batch or bounded-loop same-type writes according to the official contract.
+- Prefer batch/bulk/upsert APIs. A list of N items must not cause approximately N model turns.
+- Do not read after write when the write response already provides authoritative success evidence.
+- Keep repeated stdout, Skill bodies, and per-item history out of the growing model context; maintain a
+  compact structured progress ledger instead.
+- Persist item-level external IDs and idempotency keys while executing so interruption recovery never
+  restarts successful writes from zero.
+- Instructions must state a reasonable model-planning-step target, tool-call order, context control,
+  and recommended batch size. Smoke/Eval must include a multi-item case and record model steps, tool
+  calls, input tokens, and elapsed time as a performance baseline.
+
+Validation must reject an implementation that reloads the same Skill/schema per item, performs one
+model turn per record, or grows full context linearly with every repeated operation even if the final
+functional result is correct.
 
 ## Automatic validation and repair
 

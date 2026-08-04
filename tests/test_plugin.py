@@ -49,6 +49,9 @@ class PluginTests(unittest.TestCase):
                 "# Demo\n缺少信息时调用 ask_question，使会话进入 input_requested。"
                 "用户补充后重新检查剩余缺口，继续询问下一项；缺信息时不得标记完成或输出最终交付物。"
                 "只有任务成功、无法继续的明确失败或用户明确取消才能结束。"
+                "一次形成完整执行计划，每个 Skill 和 Schema 只加载一次并复用。"
+                "同类操作批量执行，禁止每条记录单独触发模型规划。"
+                "使用幂等键支持中断恢复，避免重试时重复创建。"
                 "工具失败时不得声称成功，并说明下一步。\n"
             ),
         }
@@ -57,6 +60,8 @@ class PluginTests(unittest.TestCase):
             "id": "demo", "name": "Demo", "version": "0.1.0", "runtime": "eve",
             "capabilities": ["review"], "description": "Demo", "pricing": {"model": "per_run", "amount_credits": 5},
             "deliverable": {"required": True, "formats": ["markdown"]},
+            "interaction_policy": {"execution_mode":"clarify_until_ready",
+                                   "dangerous_action_approval":"always"},
             "examples": ["完整输入一", "完整输入二"],
             "runtime_ui": {
                 "startup_message": "正在启动审查助手…",
@@ -141,6 +146,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn("short-lived user credential", skill)
         self.assertIn("lark_cli_preflight.py", skill)
         self.assertIn("GitHub's latest", skill)
+        self.assertIn("Mandatory interaction and approval policy choices",skill)
+        self.assertIn("Mandatory runtime-efficiency contract",skill)
         reference = PLUGIN / "skills/agentour-compiler/references/feishu-capabilities.md"
         self.assertTrue(reference.is_file())
         self.assertIn("lark-task", reference.read_text(encoding="utf-8"))
@@ -193,6 +200,24 @@ class PluginTests(unittest.TestCase):
             ], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("required-input state-machine", result.stdout)
+
+    def test_validator_accepts_auto_execute_without_question_state_machine(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package=pathlib.Path(temp)/"demo"
+            self.make_package(package)
+            manifest_path=package/"agentour.json"
+            manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["interaction_policy"]={"execution_mode":"auto_execute",
+                "dangerous_action_approval":"none"}
+            manifest_path.write_text(json.dumps(manifest,ensure_ascii=False),encoding="utf-8")
+            (package/"payload/agent/instructions.md").write_text(
+                "# Demo\n采用合理默认值，不要追问或调用 ask_question；在最终报告说明默认值。"
+                "完全无法解析执行目标时诚实失败，不得编造。一次形成完整执行计划，Skill 和 Schema "
+                "只加载一次并复用；同类操作批量执行，禁止每条记录单独触发模型。使用幂等键支持中断恢复。"
+                "工具失败时不得声称成功，并说明下一步。\n",encoding="utf-8")
+            result=subprocess.run([sys.executable,str(PLUGIN/"scripts/validate_package.py"),str(package)],
+                capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
     def test_validator_enforces_agentour_managed_feishu_credentials(self):
         with tempfile.TemporaryDirectory() as temp:

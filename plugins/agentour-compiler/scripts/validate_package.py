@@ -184,7 +184,16 @@ def main() -> int:
                 critical.append("Contract v4 forbids package.json#pnpm.overrides; use explicit dependencies")
     except Exception as exc: critical.append(f"Invalid payload/package.json: {exc}")
 
-    if int(manifest.get("compiler_contract_version", 0) or 0) >= 4:
+    interaction_policy=manifest.get("interaction_policy") or {}
+    execution_mode=str(interaction_policy.get("execution_mode") or "clarify_until_ready")
+    if execution_mode not in {"auto_execute","clarify_until_ready"}:
+        critical.append("interaction_policy.execution_mode must be auto_execute or clarify_until_ready")
+    dangerous_approval=str(interaction_policy.get("dangerous_action_approval") or "always")
+    if dangerous_approval not in {"always","none"}:
+        critical.append("interaction_policy.dangerous_action_approval must be always or none")
+    if dangerous_approval=="none" and manifest.get("approval_required"):
+        critical.append("dangerous_action_approval=none conflicts with manifest.approval_required")
+    if int(manifest.get("compiler_contract_version", 0) or 0) >= 4 and execution_mode=="clarify_until_ready":
         agent_source = ((root / "payload/agent/agent.ts").read_text(encoding="utf-8", errors="replace")
                         if (root / "payload/agent/agent.ts").is_file() else "")
         if re.search(r"defineAgent\s*\(\s*\{[\s\S]*?\bsystem\s*:", agent_source):
@@ -298,7 +307,8 @@ def main() -> int:
         readme=(root/"README.md").read_text(encoding="utf-8",errors="replace") if (root/"README.md").is_file() else ""
         if not re.search(r"(?:飞书|Feishu|Lark).{0,100}(?:授权|authorize|grant)",readme,re.I|re.S):
             critical.append("README must explain Feishu account authorization and per-Agent grant")
-    if int(manifest.get("compiler_contract_version", 0) or 0) >= 4:
+    if (int(manifest.get("compiler_contract_version", 0) or 0) >= 4 and
+            execution_mode == "clarify_until_ready"):
         missing_input_contract = {
             "ask_question": r"ask_question",
             "input_requested": r"input_requested",
@@ -309,6 +319,26 @@ def main() -> int:
         for label, pattern in missing_input_contract.items():
             if not re.search(pattern, content, re.I | re.S):
                 critical.append(f"instructions.md missing required-input state-machine rule: {label}")
+    if execution_mode=="auto_execute":
+        auto_contract={
+            "safe defaults":r"(?:合理|安全).{0,20}(?:默认|缺省)",
+            "no ordinary follow-up":r"(?:不|不要|不得).{0,30}(?:追问|ask_question)",
+            "disclose defaults":r"(?:最终|交付|报告).{0,30}(?:说明|披露).{0,20}(?:默认|缺省)",
+            "honest hard boundary":r"(?:无法|不能).{0,30}(?:执行|解析|确定).{0,50}(?:失败|说明|不得编造)",
+        }
+        for label,pattern in auto_contract.items():
+            if not re.search(pattern,content,re.I|re.S):
+                critical.append(f"auto_execute instructions missing rule: {label}")
+    efficiency_contract={
+        "single planning pass":r"(?:一次|完整).{0,20}(?:规划|执行计划)",
+        "skill/schema reuse":r"(?:Skill|Schema|schema).{0,40}(?:一次|复用|不得重复|最多加载)",
+        "batch execution":r"(?:批量|batch|bulk|bounded|有界循环)",
+        "no per-item model turn":r"(?:不得|禁止|不要).{0,40}(?:每条|逐条|每个).{0,30}(?:模型|model)",
+        "idempotent recovery":r"(?:幂等|idempotenc).{0,50}(?:中断|重试|恢复|重复创建)",
+    }
+    for label,pattern in efficiency_contract.items():
+        if not re.search(pattern,content,re.I|re.S):
+            critical.append(f"instructions.md missing runtime-efficiency rule: {label}")
     if not re.search(r"(失败|error).{0,80}(不得声称成功|do not claim success|下一步)", content, re.I | re.S):
         critical.append("instructions.md must define honest tool-failure and fallback-delivery behavior")
     if manifest.get("approval_required") and "审批" not in content and "approval" not in content.lower():

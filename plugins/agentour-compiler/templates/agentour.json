@@ -12,6 +12,10 @@
   },
   "secrets": [],
   "approval_required": [],
+  "interaction_policy": {
+    "execution_mode": "clarify_until_ready",
+    "dangerous_action_approval": "always"
+  },
   "tool_ux": {},
   "approval_ux": {},
   "deliverable": {"required": true, "formats": ["markdown"]},
