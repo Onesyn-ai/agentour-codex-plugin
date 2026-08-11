@@ -115,8 +115,8 @@ def get_token(platform: str) -> str:
 def set_token(platform: str, token: str) -> str:
     platform = _check(platform)
     token = token.strip()
-    if not token.startswith("at_"):
-        raise ValueError("developer token must start with at_")
+    if not token.startswith(("ak_", "at_")):
+        raise ValueError("account token must start with ak_ (legacy at_ is also accepted)")
     backend = backend_name()
     account = f"{platform}:default"
     if backend == "environment":

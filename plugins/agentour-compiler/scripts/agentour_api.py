@@ -56,6 +56,11 @@ class APITransportError(RuntimeError):
     """A retryable transport failure. POST callers must not blindly resubmit."""
 
 
+def is_account_token(token: str) -> bool:
+    """Accept the unified account token and legacy developer credentials."""
+    return token.startswith(("ak_", "at_"))
+
+
 def base_url(platform: str) -> str:
     return PLATFORMS[platform]["url"]
 
@@ -68,7 +73,7 @@ def request(platform: str, path: str, *, method: str = "GET",
         headers["Content-Type"] = content_type
     if auth:
         token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(platform)
-        if not token.startswith("at_"):
+        if not is_account_token(token):
             raise SystemExit(f"No saved developer token for {platform}; store one before continuing")
         headers["Authorization"] = f"Bearer {token}"
     attempts = 4 if method in {"GET", "HEAD"} else 1
@@ -284,7 +289,7 @@ def cmd_bootstrap(args):
             return
     args.platform = platform
     token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(platform)
-    if not token.startswith("at_"):
+    if not is_account_token(token):
         result.update({"platform": platform, "token_required": True})
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return
@@ -632,7 +637,7 @@ def cmd_restore_checkpoint(args):
     task_id = urllib.parse.quote(args.task_id, safe="")
     headers = {"Accept": "application/gzip"}
     token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(args.platform)
-    if not token.startswith("at_"):
+    if not is_account_token(token):
         raise SystemExit(f"No saved developer token for {args.platform}")
     headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(base_url(args.platform) +
@@ -661,7 +666,7 @@ def cmd_restore_checkpoint(args):
 
 def cmd_upload_references(args):
     token=os.environ.get("AGENTOUR_TOKEN","").strip() or get_token(args.platform)
-    if not token.startswith("at_"):raise SystemExit("No saved developer token")
+    if not is_account_token(token):raise SystemExit("No saved developer token")
     uploaded=[]
     for raw in args.files:
         path=pathlib.Path(raw).expanduser().resolve()
