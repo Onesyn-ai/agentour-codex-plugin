@@ -319,6 +319,16 @@ class PluginTests(unittest.TestCase):
             else:
                 os.environ["AGENTOUR_TOKEN"] = old
 
+    def test_tenant_subject_token_is_supported(self):
+        api = load_api()
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b'{"developer_id":"tenant:ten_demo:subject:tsu_demo"}'
+        with mock.patch.dict(os.environ, {"AGENTOUR_TOKEN": "ts_tenant_token"}), \
+             mock.patch.object(api.urllib.request, "urlopen", return_value=response):
+            result=api.request("test","/v1/dev/me",auth=True)
+        self.assertTrue(result["developer_id"].startswith("tenant:"))
+
     def test_unified_account_token_prefix_is_accepted(self):
         api = load_api()
         with mock.patch.object(api, "get_token", return_value="ak_test"), \
