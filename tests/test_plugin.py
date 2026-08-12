@@ -109,6 +109,17 @@ class PluginTests(unittest.TestCase):
         self.assertIn("build-preflight", (PLUGIN / "scripts/agentour_api.py").read_text())
         self.assertIn("bootstrap", (PLUGIN / "scripts/agentour_api.py").read_text())
 
+    def test_token_guidance_requires_dedicated_api_token(self):
+        guidance = "\n".join([
+            (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8"),
+            (PLUGIN / "guides/publishing.md").read_text(encoding="utf-8"),
+        ])
+        self.assertIn("dedicated `ak_...` API Token", guidance)
+        self.assertIn("HttpOnly Cookie", guidance)
+        self.assertIn("Never instruct the", guidance)
+        self.assertIn("user to inspect browser storage", guidance)
+        self.assertIn("never ask for or reuse browser cookies", guidance)
+
     def test_bootstrap_requires_platform_before_interview(self):
         api = load_api()
         args = SimpleNamespace(target_platform=None, platform="production")

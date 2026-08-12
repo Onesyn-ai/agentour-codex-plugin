@@ -21,7 +21,10 @@ the Agent's purpose until the command returns `ready_for_interview: true`.
 - `restart_required`: stop and ask for a new Thread.
 - `platform_choice_required`: ask only the fixed platform choice, then rerun with
   `bootstrap --target-platform <test|production>`.
-- `token_required`: ask only for that platform's developer token, store it, then rerun the same command.
+- `token_required`: ask only for that platform's developer token. Tell the user to sign in to the
+  selected Agentour website and generate a dedicated API Token from its developer/Plugin page, then
+  store it and rerun the same command. Never ask the user to copy a browser cookie, OIDC provider
+  token, or any value from `localStorage`.
 - `blocked`: stop and report the bootstrap error.
 - `ready_for_interview`: use the returned Contract, recommended model, and active Compiler Tasks.
 
@@ -99,6 +102,10 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/credential_store.py" status <test|producti
 ```
 
 If a token is stored, validate it immediately without asking the user. Only ask for a token when none is stored or the platform explicitly returns 401/403. After receiving a replacement, validate it and store it through `credential_store.py set <platform>`; the credential script automatically selects Windows Credential Manager, macOS Keychain, Linux Secret Service, WSL bridging, environment variables, or a permission-restricted fallback.
+
+The required credential is a dedicated `ak_...` API Token generated after signing in to Agentour's
+developer/Plugin page. Browser authentication remains an HttpOnly Cookie session. Never instruct the
+user to inspect browser storage or reuse a Cookie/OIDC token as `AGENTOUR_TOKEN`.
 
 Validate immediately:
 
