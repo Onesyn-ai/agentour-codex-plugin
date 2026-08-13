@@ -144,6 +144,27 @@ def authenticated(args, path: str, *, method: str = "GET", body: dict | None = N
     return request(args.platform, path, method=method, data=data, auth=True)
 
 
+def cmd_repository(args):
+    """Read a tenant-scoped repository summary through Core's Forge contract."""
+    rid = urllib.parse.quote(args.repository_id, safe="")
+    result = authenticated(args, f"/v1/agentour/repositories/{rid}")
+    record_flight("repository_read", repository_id=args.repository_id,
+                  contract_version=result.get("contract_version", "1.0"))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_source_revision(args):
+    """Create a fixed source revision request; the server remains authoritative."""
+    rid = urllib.parse.quote(args.repository_id, safe="")
+    body = {"repository_id": args.repository_id, "commit_sha": args.commit_sha,
+            "tree_digest": args.tree_digest, "contract_version": "1.0"}
+    result = authenticated(args, f"/v1/dev/repositories/{rid}/source-revisions",
+                           method="POST", body=body)
+    record_flight("source_revision_submitted", repository_id=args.repository_id,
+                  commit_sha=args.commit_sha, contract_version="1.0")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def poll_job(args, path: str, job_type: str, job_id: str):
     """Poll an already-created job; transient reads never create a replacement job."""
     try:
@@ -775,6 +796,12 @@ def main():
     bootstrap.add_argument("--target-platform", choices=PLATFORMS)
     sub.add_parser("verify-token")
     sub.add_parser("models")
+    repository = sub.add_parser("repository")
+    repository.add_argument("repository_id")
+    source_revision = sub.add_parser("source-revision")
+    source_revision.add_argument("repository_id")
+    source_revision.add_argument("commit_sha")
+    source_revision.add_argument("--tree-digest", required=True)
     update = sub.add_parser("check-update")
     update.add_argument("--auto", action="store_true")
     sub.add_parser("contract")
@@ -873,6 +900,10 @@ def main():
         cmd_verify_token(args)
     elif args.command == "models":
         cmd_models(args)
+    elif args.command == "repository":
+        cmd_repository(args)
+    elif args.command == "source-revision":
+        cmd_source_revision(args)
     elif args.command == "check-update":
         cmd_check_update(args)
     elif args.command == "contract":
