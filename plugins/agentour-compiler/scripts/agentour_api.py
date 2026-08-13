@@ -165,6 +165,20 @@ def cmd_source_revision(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def cmd_release(args):
+    body = {"package_id": args.package_id, "version": args.version,
+            "repository_id": args.repository_id, "source_revision_id": args.source_revision_id,
+            "commit_sha": args.commit_sha, "tree_digest": args.tree_digest,
+            "source_digest": args.source_digest, "package_hash": args.package_hash,
+            "build_input_digest": args.build_input_digest, "build_output_digest": args.build_output_digest,
+            "gate_report_digest": args.gate_report_digest, "artifact_digest": args.artifact_digest,
+            "visibility": args.visibility, "tag": args.tag or None}
+    result = authenticated(args, "/v1/dev/releases", method="POST", body=body)
+    record_flight("release_record_submitted", package_id=args.package_id,
+                  source_revision_id=args.source_revision_id, contract_version="1.0")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def poll_job(args, path: str, job_type: str, job_id: str):
     """Poll an already-created job; transient reads never create a replacement job."""
     try:
@@ -802,6 +816,11 @@ def main():
     source_revision.add_argument("repository_id")
     source_revision.add_argument("commit_sha")
     source_revision.add_argument("--tree-digest", required=True)
+    release = sub.add_parser("release")
+    for name in ("package-id", "version", "repository-id", "source-revision-id", "commit-sha", "tree-digest", "source-digest", "package-hash", "build-input-digest", "build-output-digest", "gate-report-digest", "artifact-digest"):
+        release.add_argument("--" + name, required=True)
+    release.add_argument("--visibility", choices=("private", "public"), default="private")
+    release.add_argument("--tag", default="")
     update = sub.add_parser("check-update")
     update.add_argument("--auto", action="store_true")
     sub.add_parser("contract")
@@ -904,6 +923,8 @@ def main():
         cmd_repository(args)
     elif args.command == "source-revision":
         cmd_source_revision(args)
+    elif args.command == "release":
+        cmd_release(args)
     elif args.command == "check-update":
         cmd_check_update(args)
     elif args.command == "contract":
