@@ -57,6 +57,15 @@ def _fallback_write(data: dict) -> None:
         path.chmod(0o600)
     except OSError:
         pass
+    if os.name == "nt":
+        username = os.environ.get("USERNAME", "").strip()
+        if username and shutil.which("icacls"):
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r", "/grant:r", f"{username}:F"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
 
 
 def _powershell() -> str | None:

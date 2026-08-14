@@ -76,14 +76,14 @@ class PluginTests(unittest.TestCase):
             path.write_text(content, encoding="utf-8")
 
     def test_manifest_and_marketplace_names_match(self):
-        manifest = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text())
-        market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text())
+        manifest = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
 
     def test_api_client_version_matches_installed_manifest(self):
         api = load_api()
-        manifest = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text())
+        manifest = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(api.PLUGIN_VERSION, manifest["version"])
 
     def test_same_marketplace_version_never_requires_restart(self):
@@ -104,10 +104,10 @@ class PluginTests(unittest.TestCase):
         api = load_api()
         self.assertEqual(api.base_url("test"), "https://test.agentour.ai")
         self.assertEqual(api.base_url("production"), "https://agentour.ai")
-        self.assertIn("remote-build", (PLUGIN / "scripts/agentour_api.py").read_text())
-        self.assertIn("compiler-tasks", (PLUGIN / "scripts/agentour_api.py").read_text())
-        self.assertIn("build-preflight", (PLUGIN / "scripts/agentour_api.py").read_text())
-        self.assertIn("bootstrap", (PLUGIN / "scripts/agentour_api.py").read_text())
+        self.assertIn("remote-build", (PLUGIN / "scripts/agentour_api.py").read_text(encoding="utf-8"))
+        self.assertIn("compiler-tasks", (PLUGIN / "scripts/agentour_api.py").read_text(encoding="utf-8"))
+        self.assertIn("build-preflight", (PLUGIN / "scripts/agentour_api.py").read_text(encoding="utf-8"))
+        self.assertIn("bootstrap", (PLUGIN / "scripts/agentour_api.py").read_text(encoding="utf-8"))
 
     def test_token_guidance_requires_dedicated_api_token(self):
         guidance = "\n".join([
@@ -415,7 +415,10 @@ class PluginTests(unittest.TestCase):
             self.assertEqual(module.set_token("production", "at_persistent_value"), "restricted-file")
             self.assertEqual(module.get_token("production"), "at_persistent_value")
             credential = pathlib.Path(temp) / "agentour/credentials.json"
-            self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
+            if os.name == "nt":
+                self.assertTrue(credential.is_file())
+            else:
+                self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
 
     def test_package_tarball(self):
         api = load_api()
@@ -467,7 +470,7 @@ class PluginTests(unittest.TestCase):
             package = pathlib.Path(temp) / "demo"
             self.make_package(package)
             manifest_path = package / "agentour.json"
-            manifest = json.loads(manifest_path.read_text())
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["runtime_ui"]["capabilities"]["review"]["loading_message"] = "load skill review"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             result = subprocess.run([
