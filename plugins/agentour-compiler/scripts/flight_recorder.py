@@ -12,6 +12,7 @@ import hashlib
 
 _SECRET_KEYS = re.compile(r"(token|secret|password|api[_-]?key|credential|authorization)", re.I)
 _SECRET_VALUES = [
+    re.compile(r"\bak_[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\bat_[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\be2b_[A-Za-z0-9_-]{8,}\b"),

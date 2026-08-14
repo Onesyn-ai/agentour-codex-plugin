@@ -8,7 +8,8 @@ HttpOnly Cookie; never ask for or reuse browser cookies, OIDC provider tokens, o
 Prefer asynchronous publication:
 
 ```bash
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" publish-async packages/<agent-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" publish-async packages/<agent-id> \
+  --visibility <private|public>
 ```
 
 Before uploading, show the destination host, Agent ID, version, visibility, fidelity grade, and unsupported capabilities. Never publish to a remote platform without authorization.
@@ -24,3 +25,6 @@ On Windows, pass structured Compiler Task state with `--state-file <utf8-json-fi
 embedding JSON in PowerShell arguments. Before paid Build, the static validator must have checked
 that Smoke cases are self-contained, expected tools exist, all template placeholders are replaced,
 and runtime environment variables match `manifest.secrets`.
+
+For the managed Forge Source Revision/Build/Eval/Release commands and the exact external API blockers,
+read `guides/forge-workflow.md`. Never substitute local Git state for a remote Source Revision.

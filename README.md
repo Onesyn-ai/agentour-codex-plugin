@@ -22,7 +22,7 @@ Use natural language; do not choose internal Skills:
 The Plugin enforces this sequence:
 
 1. Choose **测试服** (`https://test.agentour.ai`) or **正式服** (`https://agentour.ai`).
-2. Enter a `at_` developer token; the Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
+2. Enter an `ak_` account token; legacy `at_` developer tokens remain accepted during migration. The Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
 3. Fetch models from that platform's `GET /v1/models`, probe every model, and remove unavailable models before selection.
 4. Choose whether to reconstruct an existing Agent or invent a new one.
 5. Complete a one-question-per-turn brainstorm and grill-me interview.
@@ -37,6 +37,12 @@ with blind retries. Deterministic failures require a Package repair. Superseded 
 stopped with `cancel-build <job-id>`.
 Interrupted observation can be continued with `track-build <job-id>` without creating or charging
 a replacement Build.
+
+Managed Forge source records use the frozen Core developer contract. The Plugin can read an existing
+Repository, create/read a fixed Source Revision, submit its Build and Eval, create/read a Release, and
+save a credential-free Forge checkpoint. Repository creation, Git credential exchange, clone/push,
+and automated PR/Review remain blocked until Core exposes the required public developer APIs; local
+files must not be described as published source.
 
 At workflow startup the Plugin checks the latest GitHub Marketplace version. If a newer version exists it runs the Codex Plugin installer automatically, then asks you to start a new Thread so Codex loads the new code.
 

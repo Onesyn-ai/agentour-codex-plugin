@@ -109,6 +109,69 @@ class PluginTests(unittest.TestCase):
         self.assertIn("build-preflight", (PLUGIN / "scripts/agentour_api.py").read_text(encoding="utf-8"))
         self.assertIn("bootstrap", (PLUGIN / "scripts/agentour_api.py").read_text(encoding="utf-8"))
 
+    def test_forge_repository_uses_frozen_developer_contract(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test", repository_id="repo_1")
+        with mock.patch.object(api, "authenticated", return_value={"repository_id": "repo_1"}) as request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_repository(args)
+        request.assert_called_once_with(args, "/v1/dev/repositories/repo_1")
+
+    def test_forge_creation_commands_send_stable_idempotency_keys(self):
+        api = load_api()
+        commit = "a" * 40
+        source_args = SimpleNamespace(platform="test", repository_id="repo_1", commit_sha=commit)
+        build_args = SimpleNamespace(platform="test", source_revision_id="sr_1")
+        release_args = SimpleNamespace(platform="test", package_id="pkg_1", version="1.2.3",
+                                       source_revision_id="sr_1", visibility="private", tag="")
+        with mock.patch.object(api, "authenticated", return_value={"source_revision_id": "sr_1"}) as request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_source_revision(source_args)
+            first = request.call_args
+            api.cmd_source_revision(source_args)
+            second = request.call_args
+        self.assertEqual(first.kwargs["body"], {"commit_sha": commit})
+        self.assertEqual(first.kwargs["idempotency_key"], second.kwargs["idempotency_key"])
+        self.assertTrue(first.kwargs["idempotency_key"].startswith("agentour-source-revision-"))
+
+        with mock.patch.object(api, "authenticated", side_effect=[
+                {"build_id": "bld_1"}, {"eval_run_id": "evr_1"}, {"release_id": "rel_1"}]) as request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_source_build(build_args)
+            api.cmd_source_eval(build_args)
+            api.cmd_release(release_args)
+        build_call, eval_call, release_call = request.call_args_list
+        self.assertEqual(build_call.args[1], "/v1/dev/source-revisions/sr_1/builds")
+        self.assertEqual(eval_call.args[1], "/v1/dev/source-revisions/sr_1/eval-runs")
+        self.assertTrue(build_call.kwargs["idempotency_key"].startswith("agentour-source-build-"))
+        self.assertTrue(eval_call.kwargs["idempotency_key"].startswith("agentour-source-eval-"))
+        self.assertEqual(release_call.kwargs["body"], {
+            "package_id": "pkg_1", "version": "1.2.3", "source_revision_id": "sr_1",
+            "visibility": "private", "tag": None,
+        })
+        self.assertTrue(release_call.kwargs["idempotency_key"].startswith("agentour-release-"))
+
+    def test_authenticated_places_idempotency_key_in_http_header(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test")
+        with mock.patch.object(api, "request", return_value={}) as request:
+            api.authenticated(args, "/v1/dev/releases", method="POST", body={"x": 1},
+                              idempotency_key="agentour-release-example")
+        self.assertEqual(request.call_args.kwargs["extra_headers"], {
+            "Idempotency-Key": "agentour-release-example"
+        })
+
+    def test_forge_status_commands_resume_existing_remote_records(self):
+        api = load_api()
+        args = SimpleNamespace(platform="production", source_revision_id="sr_1")
+        release_args = SimpleNamespace(platform="production", release_id="rel_1")
+        with mock.patch.object(api, "authenticated", side_effect=[{}, {}]) as request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_source_revision_status(args)
+            api.cmd_release_status(release_args)
+        self.assertEqual(request.call_args_list[0].args[1], "/v1/dev/source-revisions/sr_1")
+        self.assertEqual(request.call_args_list[1].args[1], "/v1/dev/releases/rel_1")
+
     def test_token_guidance_requires_dedicated_api_token(self):
         guidance = "\n".join([
             (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8"),
@@ -347,7 +410,8 @@ class PluginTests(unittest.TestCase):
             old = os.environ.get("AGENTOUR_COMPILER_FLIGHT_LOG")
             os.environ["AGENTOUR_COMPILER_FLIGHT_LOG"] = str(pathlib.Path(td) / "flight.json")
             try:
-                module.record("failure", error="Bearer secret-value", api_key="sk-secret-value")
+                module.record("failure", error="Bearer secret-value ak_example123456789",
+                              api_key="sk-secret-value")
                 module.record_job_sample("validation", {
                     "id": "val_1", "status": "running",
                     "report": {"heartbeat_at": 12, "stage": "smoke"}},
@@ -358,7 +422,45 @@ class PluginTests(unittest.TestCase):
                 else: os.environ["AGENTOUR_COMPILER_FLIGHT_LOG"] = old
         self.assertEqual(data["events"][0]["api_key"], "[REDACTED]")
         self.assertNotIn("secret-value", json.dumps(data))
+        self.assertNotIn("ak_example123456789", json.dumps(data))
         self.assertEqual(data["events"][1]["poll_count"], 3)
+
+    def test_forge_checkpoint_is_allowlisted_and_invalidates_changed_commit(self):
+        api = load_api()
+        checkpoint = {
+            "repository_id": "repo_1",
+            "commit_sha": "a" * 40,
+            "remote_job_id": "bld_1",
+            "contract_version": "1.0",
+            "stage": "build_submitted",
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / "forge-checkpoint.json"
+            self.assertEqual(api.write_forge_checkpoint(path, checkpoint), checkpoint)
+            self.assertEqual(api.read_forge_checkpoint(path), checkpoint)
+            changed = api.read_forge_checkpoint(path, "b" * 40)
+        self.assertEqual(changed["commit_sha"], "b" * 40)
+        self.assertEqual(changed["remote_job_id"], "")
+        self.assertEqual(changed["stage"], "commit_changed")
+
+    def test_forge_checkpoint_rejects_credentials_and_unknown_fields(self):
+        api = load_api()
+        checkpoint = {
+            "repository_id": "repo_1", "commit_sha": "a" * 40,
+            "remote_job_id": "", "contract_version": "1.0",
+            "stage": "repository_resolved",
+        }
+        with self.assertRaises(ValueError):
+            api.validate_forge_checkpoint({**checkpoint, "token": "ak_example123456789"})
+        with self.assertRaises(ValueError):
+            api.validate_forge_checkpoint({**checkpoint, "remote_job_id": "ak_example123456789"})
+
+    def test_publishing_docs_use_unified_token_and_valid_visibility_command(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        guide = (PLUGIN / "guides/publishing.md").read_text(encoding="utf-8")
+        self.assertIn("`ak_` account token", readme)
+        self.assertNotIn("Enter a `at_` developer token", readme)
+        self.assertIn("--visibility <private|public>", guide)
 
     def test_default_flight_log_is_outside_package(self):
         script = PLUGIN / "scripts/flight_recorder.py"

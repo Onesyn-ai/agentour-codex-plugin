@@ -153,6 +153,24 @@ differ. Preserve unaffected behavior and create a new immutable version. Recheck
 examples, approvals, deliverables, Knowledge Contract, Smoke, Evals, and fidelity instead of inheriting
 old claims blindly.
 
+### 5A.1 Managed Forge source gate
+
+Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
+developer routes implemented by `agentour_api.py`: `repository`, `source-revision`,
+`source-revision-status`, `source-build`, `source-eval`, `release`, and `release-status`. These create
+commands send deterministic idempotency keys, and Release sends only its public identity; Core derives
+and validates all Commit/tree/Build/Eval/Artifact lineage.
+
+After every remote stage, write `save-forge-checkpoint` with only Repository ID, full Commit SHA,
+current remote Job ID, contract version, and stage. Restore it with `restore-forge-checkpoint`; when the
+Commit changed, discard the old remote Job and resume from `commit_changed`. Never place a Core token,
+Git credential, URL credential, secret, or Drive credential in checkpoint state.
+
+Repository create/resolve, short-lived Git credential exchange, clone/push, and automated PR/Review
+are external blockers until Core exposes the exact public contracts listed in the guide. Do not invent
+an endpoint, use a long-lived Forgejo PAT, treat the local directory as source authority, or describe an
+unpushed Commit / missing Source Revision as published.
+
 ### 5B. Existing Agent inventory
 
 Inspect before asking about anything discoverable. Inventory entrypoints, Agents, prompts, skills, tools, MCP servers, sub-agents, workflows, routing, tests, examples, dependencies, environment variables, external services, files, attachments, approvals, artefacts, retries, and failures.

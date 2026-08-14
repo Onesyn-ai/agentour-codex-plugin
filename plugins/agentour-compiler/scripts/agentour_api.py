@@ -50,6 +50,18 @@ def installed_plugin_version() -> str:
 
 PLUGIN_VERSION = installed_plugin_version()
 LATEST_MANIFEST_URL = "https://raw.githubusercontent.com/Onesyn-ai/agentour-codex-plugin/main/plugins/agentour-compiler/.codex-plugin/plugin.json"
+FORGE_CONTRACT_VERSION = "1.0"
+FORGE_CHECKPOINT_FIELDS = frozenset({
+    "repository_id", "commit_sha", "remote_job_id", "contract_version", "stage",
+})
+FORGE_CHECKPOINT_STAGES = frozenset({
+    "repository_resolved", "baseline_cloned", "changes_committed", "pushed",
+    "review_pending", "source_revision_created", "build_submitted",
+    "eval_submitted", "release_submitted", "completed", "commit_changed",
+})
+_CHECKPOINT_SECRET = re.compile(
+    r"(?:\b(?:ak|at|e2b)_[A-Za-z0-9_-]{8,}\b|\bsk-[A-Za-z0-9_-]{8,}\b|"
+    r"Bearer\s+\S+)", re.I)
 
 
 class APITransportError(RuntimeError):
@@ -67,10 +79,12 @@ def base_url(platform: str) -> str:
 
 def request(platform: str, path: str, *, method: str = "GET",
             data: bytes | None = None, auth: bool = False,
-            content_type: str = "application/json"):
+            content_type: str = "application/json",
+            extra_headers: dict[str, str] | None = None):
     headers = {"Accept": "application/json"}
     if data is not None:
         headers["Content-Type"] = content_type
+    headers.update(extra_headers or {})
     if auth:
         token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(platform)
         if not is_account_token(token):
@@ -139,44 +153,177 @@ def package_payload(package_dir: pathlib.Path) -> tuple[bytes, dict]:
                      "archive_bytes": len(payload), "largest": largest}
 
 
-def authenticated(args, path: str, *, method: str = "GET", body: dict | None = None):
+def authenticated(args, path: str, *, method: str = "GET", body: dict | None = None,
+                  idempotency_key: str = ""):
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
-    return request(args.platform, path, method=method, data=data, auth=True)
+    headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+    return request(args.platform, path, method=method, data=data, auth=True,
+                   extra_headers=headers)
+
+
+def stable_idempotency_key(operation: str, *parts: str) -> str:
+    """Return the same bounded key for the same immutable creation request."""
+    normalized = "\x1f".join(str(part).strip() for part in parts)
+    digest = hashlib.sha256(
+        f"{FORGE_CONTRACT_VERSION}\x1f{operation}\x1f{normalized}".encode("utf-8")
+    ).hexdigest()
+    label = re.sub(r"[^a-z0-9-]+", "-", operation.lower()).strip("-") or "create"
+    return f"agentour-{label}-{digest[:40]}"
 
 
 def cmd_repository(args):
     """Read a tenant-scoped repository summary through Core's Forge contract."""
     rid = urllib.parse.quote(args.repository_id, safe="")
-    result = authenticated(args, f"/v1/agentour/repositories/{rid}")
+    result = authenticated(args, f"/v1/dev/repositories/{rid}")
     record_flight("repository_read", repository_id=args.repository_id,
-                  contract_version=result.get("contract_version", "1.0"))
+                  contract_version=result.get("contract_version", FORGE_CONTRACT_VERSION))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_source_revision(args):
     """Create a fixed source revision request; the server remains authoritative."""
     rid = urllib.parse.quote(args.repository_id, safe="")
-    body = {"repository_id": args.repository_id, "commit_sha": args.commit_sha,
-            "tree_digest": args.tree_digest, "contract_version": "1.0"}
+    body = {"commit_sha": args.commit_sha}
+    key = stable_idempotency_key("source-revision", args.repository_id,
+                                 args.commit_sha.lower())
     result = authenticated(args, f"/v1/dev/repositories/{rid}/source-revisions",
-                           method="POST", body=body)
+                           method="POST", body=body, idempotency_key=key)
     record_flight("source_revision_submitted", repository_id=args.repository_id,
-                  commit_sha=args.commit_sha, contract_version="1.0")
+                  commit_sha=args.commit_sha, source_revision_id=result.get("source_revision_id"),
+                  contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_source_revision_status(args):
+    source_revision_id = urllib.parse.quote(args.source_revision_id, safe="")
+    result = authenticated(args, f"/v1/dev/source-revisions/{source_revision_id}")
+    record_flight("source_revision_read", source_revision_id=args.source_revision_id,
+                  status=result.get("status"), contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_source_build(args):
+    source_revision_id = urllib.parse.quote(args.source_revision_id, safe="")
+    key = stable_idempotency_key("source-build", args.source_revision_id)
+    result = authenticated(args, f"/v1/dev/source-revisions/{source_revision_id}/builds",
+                           method="POST", body={}, idempotency_key=key)
+    record_flight("source_build_submitted", source_revision_id=args.source_revision_id,
+                  remote_job_id=result.get("build_id"), status=result.get("status"),
+                  contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_source_eval(args):
+    source_revision_id = urllib.parse.quote(args.source_revision_id, safe="")
+    key = stable_idempotency_key("source-eval", args.source_revision_id)
+    result = authenticated(args, f"/v1/dev/source-revisions/{source_revision_id}/eval-runs",
+                           method="POST", body={}, idempotency_key=key)
+    record_flight("source_eval_submitted", source_revision_id=args.source_revision_id,
+                  remote_job_id=result.get("eval_run_id"), status=result.get("status"),
+                  contract_version=FORGE_CONTRACT_VERSION)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_release(args):
     body = {"package_id": args.package_id, "version": args.version,
-            "repository_id": args.repository_id, "source_revision_id": args.source_revision_id,
-            "commit_sha": args.commit_sha, "tree_digest": args.tree_digest,
-            "source_digest": args.source_digest, "package_hash": args.package_hash,
-            "build_input_digest": args.build_input_digest, "build_output_digest": args.build_output_digest,
-            "gate_report_digest": args.gate_report_digest, "artifact_digest": args.artifact_digest,
+            "source_revision_id": args.source_revision_id,
             "visibility": args.visibility, "tag": args.tag or None}
-    result = authenticated(args, "/v1/dev/releases", method="POST", body=body)
+    key = stable_idempotency_key("release", args.package_id, args.version,
+                                 args.source_revision_id)
+    result = authenticated(args, "/v1/dev/releases", method="POST", body=body,
+                           idempotency_key=key)
     record_flight("release_record_submitted", package_id=args.package_id,
-                  source_revision_id=args.source_revision_id, contract_version="1.0")
+                  source_revision_id=args.source_revision_id,
+                  release_id=result.get("release_id"),
+                  contract_version=FORGE_CONTRACT_VERSION)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_release_status(args):
+    release_id = urllib.parse.quote(args.release_id, safe="")
+    result = authenticated(args, f"/v1/dev/releases/{release_id}")
+    record_flight("release_record_read", release_id=args.release_id,
+                  status=result.get("status"), contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def validate_forge_checkpoint(value: dict) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError("Forge checkpoint must be a JSON object")
+    unexpected = set(value) - FORGE_CHECKPOINT_FIELDS
+    missing = FORGE_CHECKPOINT_FIELDS - set(value)
+    if unexpected or missing:
+        raise ValueError(
+            "Forge checkpoint fields must be exactly: " +
+            ", ".join(sorted(FORGE_CHECKPOINT_FIELDS))
+        )
+    checkpoint = {key: value[key] for key in FORGE_CHECKPOINT_FIELDS}
+    if any(not isinstance(item, str) for item in checkpoint.values()):
+        raise ValueError("Forge checkpoint values must be strings")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", checkpoint["repository_id"]):
+        raise ValueError("Forge checkpoint repository_id is invalid")
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", checkpoint["commit_sha"]):
+        raise ValueError("Forge checkpoint commit_sha must be a full fixed SHA")
+    if checkpoint["remote_job_id"] and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", checkpoint["remote_job_id"]):
+        raise ValueError("Forge checkpoint remote_job_id is invalid")
+    if checkpoint["contract_version"] != FORGE_CONTRACT_VERSION:
+        raise ValueError("Forge checkpoint contract_version is incompatible")
+    if checkpoint["stage"] not in FORGE_CHECKPOINT_STAGES:
+        raise ValueError("Forge checkpoint stage is invalid")
+    if any(_CHECKPOINT_SECRET.search(item) for item in checkpoint.values()):
+        raise ValueError("Forge checkpoint must not contain credentials or secret material")
+    return checkpoint
+
+
+def write_forge_checkpoint(path: pathlib.Path, checkpoint: dict) -> dict[str, str]:
+    clean = validate_forge_checkpoint(checkpoint)
+    path = path.expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                     delete=False) as handle:
+        json.dump(clean, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        temp = pathlib.Path(handle.name)
+    os.chmod(temp, 0o600)
+    temp.replace(path)
+    return clean
+
+
+def read_forge_checkpoint(path: pathlib.Path, current_commit_sha: str = "") -> dict[str, str]:
+    checkpoint = validate_forge_checkpoint(json.loads(
+        path.expanduser().resolve().read_text(encoding="utf-8")
+    ))
+    if current_commit_sha:
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", current_commit_sha):
+            raise ValueError("current commit_sha must be a full fixed SHA")
+        if checkpoint["commit_sha"].lower() != current_commit_sha.lower():
+            checkpoint = {**checkpoint, "commit_sha": current_commit_sha.lower(),
+                          "remote_job_id": "", "stage": "commit_changed"}
+    return checkpoint
+
+
+def cmd_save_forge_checkpoint(args):
+    checkpoint = write_forge_checkpoint(pathlib.Path(args.path), {
+        "repository_id": args.repository_id,
+        "commit_sha": args.commit_sha.lower(),
+        "remote_job_id": args.remote_job_id,
+        "contract_version": args.contract_version,
+        "stage": args.stage,
+    })
+    record_flight("forge_checkpoint_saved", repository_id=checkpoint["repository_id"],
+                  commit_sha=checkpoint["commit_sha"],
+                  remote_job_id=checkpoint["remote_job_id"], stage=checkpoint["stage"],
+                  contract_version=checkpoint["contract_version"])
+    print(json.dumps(checkpoint, ensure_ascii=False, indent=2))
+
+
+def cmd_restore_forge_checkpoint(args):
+    checkpoint = read_forge_checkpoint(pathlib.Path(args.path), args.current_commit_sha)
+    record_flight("forge_checkpoint_restored", repository_id=checkpoint["repository_id"],
+                  commit_sha=checkpoint["commit_sha"],
+                  remote_job_id=checkpoint["remote_job_id"], stage=checkpoint["stage"],
+                  contract_version=checkpoint["contract_version"])
+    print(json.dumps(checkpoint, ensure_ascii=False, indent=2))
 
 
 def poll_job(args, path: str, job_type: str, job_id: str):
@@ -815,12 +962,29 @@ def main():
     source_revision = sub.add_parser("source-revision")
     source_revision.add_argument("repository_id")
     source_revision.add_argument("commit_sha")
-    source_revision.add_argument("--tree-digest", required=True)
+    source_revision_status = sub.add_parser("source-revision-status")
+    source_revision_status.add_argument("source_revision_id")
+    source_build = sub.add_parser("source-build")
+    source_build.add_argument("source_revision_id")
+    source_eval = sub.add_parser("source-eval")
+    source_eval.add_argument("source_revision_id")
     release = sub.add_parser("release")
-    for name in ("package-id", "version", "repository-id", "source-revision-id", "commit-sha", "tree-digest", "source-digest", "package-hash", "build-input-digest", "build-output-digest", "gate-report-digest", "artifact-digest"):
+    for name in ("package-id", "version", "source-revision-id"):
         release.add_argument("--" + name, required=True)
     release.add_argument("--visibility", choices=("private", "public"), default="private")
     release.add_argument("--tag", default="")
+    release_status = sub.add_parser("release-status")
+    release_status.add_argument("release_id")
+    save_forge_checkpoint = sub.add_parser("save-forge-checkpoint")
+    save_forge_checkpoint.add_argument("--path", default=".agentour/forge-checkpoint.json")
+    save_forge_checkpoint.add_argument("--repository-id", required=True)
+    save_forge_checkpoint.add_argument("--commit-sha", required=True)
+    save_forge_checkpoint.add_argument("--remote-job-id", default="")
+    save_forge_checkpoint.add_argument("--contract-version", default=FORGE_CONTRACT_VERSION)
+    save_forge_checkpoint.add_argument("--stage", choices=sorted(FORGE_CHECKPOINT_STAGES), required=True)
+    restore_forge_checkpoint = sub.add_parser("restore-forge-checkpoint")
+    restore_forge_checkpoint.add_argument("--path", default=".agentour/forge-checkpoint.json")
+    restore_forge_checkpoint.add_argument("--current-commit-sha", default="")
     update = sub.add_parser("check-update")
     update.add_argument("--auto", action="store_true")
     sub.add_parser("contract")
@@ -923,8 +1087,20 @@ def main():
         cmd_repository(args)
     elif args.command == "source-revision":
         cmd_source_revision(args)
+    elif args.command == "source-revision-status":
+        cmd_source_revision_status(args)
+    elif args.command == "source-build":
+        cmd_source_build(args)
+    elif args.command == "source-eval":
+        cmd_source_eval(args)
     elif args.command == "release":
         cmd_release(args)
+    elif args.command == "release-status":
+        cmd_release_status(args)
+    elif args.command == "save-forge-checkpoint":
+        cmd_save_forge_checkpoint(args)
+    elif args.command == "restore-forge-checkpoint":
+        cmd_restore_forge_checkpoint(args)
     elif args.command == "check-update":
         cmd_check_update(args)
     elif args.command == "contract":
