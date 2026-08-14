@@ -22,7 +22,7 @@ Use natural language; do not choose internal Skills:
 The Plugin enforces this sequence:
 
 1. Choose **测试服** (`https://test.agentour.ai`) or **正式服** (`https://agentour.ai`).
-2. Enter an `ak_` account token; legacy `at_` developer tokens remain accepted during migration. The Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
+2. Enter an Agentour access token (`ak_` for a dedicated platform account API token, legacy `at_`, or `ts_` for a tenant user); the Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
 3. Fetch models from that platform's `GET /v1/models`, probe every model, and remove unavailable models before selection.
 4. Choose whether to reconstruct an existing Agent or invent a new one.
 5. Complete a one-question-per-turn brainstorm and grill-me interview.

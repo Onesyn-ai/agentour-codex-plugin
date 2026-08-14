@@ -436,6 +436,16 @@ class PluginTests(unittest.TestCase):
             else:
                 os.environ["AGENTOUR_TOKEN"] = old
 
+    def test_tenant_subject_token_is_supported(self):
+        api = load_api()
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b'{"developer_id":"tenant:ten_demo:subject:tsu_demo"}'
+        with mock.patch.dict(os.environ, {"AGENTOUR_TOKEN": "ts_tenant_token"}), \
+             mock.patch.object(api.urllib.request, "urlopen", return_value=response):
+            result=api.request("test","/v1/dev/me",auth=True)
+        self.assertTrue(result["developer_id"].startswith("tenant:"))
+
     def test_unified_account_token_prefix_is_accepted(self):
         api = load_api()
         with mock.patch.object(api, "get_token", return_value="ak_test"), \
@@ -501,7 +511,8 @@ class PluginTests(unittest.TestCase):
     def test_publishing_docs_use_unified_token_and_valid_visibility_command(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         guide = (PLUGIN / "guides/publishing.md").read_text(encoding="utf-8")
-        self.assertIn("`ak_` account token", readme)
+        self.assertIn("`ak_` for a dedicated platform account API token", readme)
+        self.assertIn("`ts_` for a tenant user", readme)
         self.assertNotIn("Enter a `at_` developer token", readme)
         self.assertIn("--visibility <private|public>", guide)
 

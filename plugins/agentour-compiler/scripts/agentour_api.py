@@ -69,8 +69,8 @@ class APITransportError(RuntimeError):
 
 
 def is_account_token(token: str) -> bool:
-    """Accept the unified account token and legacy developer credentials."""
-    return token.startswith(("ak_", "at_"))
+    """Accept platform account, legacy developer, and tenant subject tokens."""
+    return token.startswith(("ak_", "at_", "ts_"))
 
 
 def base_url(platform: str) -> str:
