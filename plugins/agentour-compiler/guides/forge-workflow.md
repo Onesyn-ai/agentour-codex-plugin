@@ -12,7 +12,11 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-build <source-revision-id>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  source-build-status <build-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-eval <source-revision-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  source-eval-status <eval-run-id>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   release --package-id <package-id> --version <semver> \
   --source-revision-id <source-revision-id> --visibility <private|public>
@@ -20,7 +24,8 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   release-status <release-id>
 ```
 
-Every create command derives a stable `Idempotency-Key` from its immutable identifiers. Release sends
+Every create command derives a stable `Idempotency-Key` from its immutable identifiers. Status commands
+read the existing Build/Eval resource and never submit replacement work. Release sends
 only `package_id`, `version`, `source_revision_id`, visibility, and an optional tag. Core remains the
 authority for Commit/tree/source, Build, Eval, Artifact, and gate lineage.
 
@@ -53,8 +58,6 @@ remains blocked until Core freezes and implements all of the following:
 - A frozen developer contract for creating a branch/ChangeSet/PR or an explicitly supported Git push
   flow, plus a read contract for current PR/Review/branch-protection state. Navigation URLs alone are
   insufficient for an automated Compiler workflow.
-- Build/Eval status retrieval or a single durable Job resource for polling after submission. The current
-  frozen routes create Build/Eval records but expose no corresponding GET route.
 - Persistent `Idempotency-Key` replay for Source Revision, Build, Eval, and Release creation. Repeating
   the same key and body must return the original resource without duplicate work or billing; reusing a
   key with a different body must return a stable conflict. Client headers alone are not sufficient.

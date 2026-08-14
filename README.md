@@ -40,7 +40,8 @@ a replacement Build.
 
 Managed Forge source records use the frozen Core developer contract. The Plugin can read an existing
 Repository, create/read a fixed Source Revision, submit its Build and Eval, create/read a Release, and
-save a credential-free Forge checkpoint. Repository creation, Git credential exchange, clone/push,
+read the submitted Build/Eval status without creating replacement work, and save a credential-free
+Forge checkpoint. Repository creation, Git credential exchange, clone/push,
 and automated PR/Review remain blocked until Core exposes the required public developer APIs; local
 files must not be described as published source.
 

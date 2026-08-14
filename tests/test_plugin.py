@@ -164,13 +164,56 @@ class PluginTests(unittest.TestCase):
     def test_forge_status_commands_resume_existing_remote_records(self):
         api = load_api()
         args = SimpleNamespace(platform="production", source_revision_id="sr_1")
+        build_args = SimpleNamespace(platform="production", build_id="bld/1")
+        eval_args = SimpleNamespace(platform="production", eval_run_id="evr/1")
         release_args = SimpleNamespace(platform="production", release_id="rel_1")
-        with mock.patch.object(api, "authenticated", side_effect=[{}, {}]) as request, \
+        with mock.patch.object(api, "authenticated", side_effect=[{}, {}, {}, {}]) as request, \
              mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
             api.cmd_source_revision_status(args)
+            api.cmd_source_build_status(build_args)
+            api.cmd_source_eval_status(eval_args)
             api.cmd_release_status(release_args)
         self.assertEqual(request.call_args_list[0].args[1], "/v1/dev/source-revisions/sr_1")
-        self.assertEqual(request.call_args_list[1].args[1], "/v1/dev/releases/rel_1")
+        self.assertEqual(request.call_args_list[1].args[1], "/v1/dev/builds/bld%2F1")
+        self.assertEqual(request.call_args_list[2].args[1], "/v1/dev/eval-runs/evr%2F1")
+        self.assertEqual(request.call_args_list[3].args[1], "/v1/dev/releases/rel_1")
+
+    def test_forge_status_commands_record_redacted_lineage_only(self):
+        api = load_api()
+        build_args = SimpleNamespace(platform="test", build_id="bld_1")
+        eval_args = SimpleNamespace(platform="test", eval_run_id="evr_1")
+        with mock.patch.object(api, "authenticated", side_effect=[
+                {"build_id": "bld_1", "source_revision_id": "sr_1",
+                 "status": "blocked", "error_code": "SOURCE_BUNDLE_UNAVAILABLE",
+                 "contract_version": "1.0"},
+                {"eval_run_id": "evr_1", "source_revision_id": "sr_1",
+                 "build_id": "bld_1", "status": "queued", "error_code": None,
+                 "contract_version": "1.0"},
+            ]), mock.patch.object(api, "record_flight") as record, \
+             mock.patch("builtins.print"):
+            api.cmd_source_build_status(build_args)
+            api.cmd_source_eval_status(eval_args)
+        build_event, eval_event = record.call_args_list
+        self.assertEqual(build_event.args[0], "source_build_read")
+        self.assertEqual(build_event.kwargs["remote_job_id"], "bld_1")
+        self.assertEqual(eval_event.args[0], "source_eval_read")
+        self.assertEqual(eval_event.kwargs["build_id"], "bld_1")
+        self.assertNotIn("token", build_event.kwargs)
+        self.assertNotIn("token", eval_event.kwargs)
+
+    def test_forge_status_commands_are_documented_and_visible_in_help(self):
+        guide = (PLUGIN / "guides/forge-workflow.md").read_text(encoding="utf-8")
+        skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("source-build-status <build-id>", guide)
+        self.assertIn("source-eval-status <eval-run-id>", guide)
+        self.assertNotIn("expose no corresponding GET route", guide)
+        self.assertIn("`source-build-status`", skill)
+        result = subprocess.run([
+            sys.executable, str(PLUGIN / "scripts/agentour_api.py"), "--help"
+        ], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("source-build-status", result.stdout)
+        self.assertIn("source-eval-status", result.stdout)
 
     def test_token_guidance_requires_dedicated_api_token(self):
         guidance = "\n".join([

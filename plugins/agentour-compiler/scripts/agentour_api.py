@@ -213,6 +213,17 @@ def cmd_source_build(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def cmd_source_build_status(args):
+    """Read an existing Source Revision Build without resubmitting work."""
+    build_id = urllib.parse.quote(args.build_id, safe="")
+    result = authenticated(args, f"/v1/dev/builds/{build_id}")
+    record_flight("source_build_read", remote_job_id=args.build_id,
+                  source_revision_id=result.get("source_revision_id"),
+                  status=result.get("status"), error_code=result.get("error_code"),
+                  contract_version=result.get("contract_version", FORGE_CONTRACT_VERSION))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def cmd_source_eval(args):
     source_revision_id = urllib.parse.quote(args.source_revision_id, safe="")
     key = stable_idempotency_key("source-eval", args.source_revision_id)
@@ -221,6 +232,18 @@ def cmd_source_eval(args):
     record_flight("source_eval_submitted", source_revision_id=args.source_revision_id,
                   remote_job_id=result.get("eval_run_id"), status=result.get("status"),
                   contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_source_eval_status(args):
+    """Read an existing Source Revision Eval without resubmitting work."""
+    eval_run_id = urllib.parse.quote(args.eval_run_id, safe="")
+    result = authenticated(args, f"/v1/dev/eval-runs/{eval_run_id}")
+    record_flight("source_eval_read", remote_job_id=args.eval_run_id,
+                  source_revision_id=result.get("source_revision_id"),
+                  build_id=result.get("build_id"), status=result.get("status"),
+                  error_code=result.get("error_code"),
+                  contract_version=result.get("contract_version", FORGE_CONTRACT_VERSION))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -964,10 +987,18 @@ def main():
     source_revision.add_argument("commit_sha")
     source_revision_status = sub.add_parser("source-revision-status")
     source_revision_status.add_argument("source_revision_id")
-    source_build = sub.add_parser("source-build")
+    source_build = sub.add_parser(
+        "source-build", help="submit a Build for a fixed Source Revision")
     source_build.add_argument("source_revision_id")
-    source_eval = sub.add_parser("source-eval")
+    source_build_status = sub.add_parser(
+        "source-build-status", help="read an existing Source Revision Build")
+    source_build_status.add_argument("build_id")
+    source_eval = sub.add_parser(
+        "source-eval", help="submit an Eval for a fixed Source Revision")
     source_eval.add_argument("source_revision_id")
+    source_eval_status = sub.add_parser(
+        "source-eval-status", help="read an existing Source Revision Eval")
+    source_eval_status.add_argument("eval_run_id")
     release = sub.add_parser("release")
     for name in ("package-id", "version", "source-revision-id"):
         release.add_argument("--" + name, required=True)
@@ -1091,8 +1122,12 @@ def main():
         cmd_source_revision_status(args)
     elif args.command == "source-build":
         cmd_source_build(args)
+    elif args.command == "source-build-status":
+        cmd_source_build_status(args)
     elif args.command == "source-eval":
         cmd_source_eval(args)
+    elif args.command == "source-eval-status":
+        cmd_source_eval_status(args)
     elif args.command == "release":
         cmd_release(args)
     elif args.command == "release-status":

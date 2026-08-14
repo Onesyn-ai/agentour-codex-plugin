@@ -157,9 +157,13 @@ old claims blindly.
 
 Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
 developer routes implemented by `agentour_api.py`: `repository`, `source-revision`,
-`source-revision-status`, `source-build`, `source-eval`, `release`, and `release-status`. These create
+`source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
+`source-eval-status`, `release`, and `release-status`. These create
 commands send deterministic idempotency keys, and Release sends only its public identity; Core derives
 and validates all Commit/tree/Build/Eval/Artifact lineage.
+
+After submitting Build or Eval, resume the same remote record with `source-build-status` or
+`source-eval-status`; an interrupted read is not authorization to create a replacement Job.
 
 After every remote stage, write `save-forge-checkpoint` with only Repository ID, full Commit SHA,
 current remote Job ID, contract version, and stage. Restore it with `restore-forge-checkpoint`; when the
