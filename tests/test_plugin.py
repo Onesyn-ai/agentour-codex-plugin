@@ -201,6 +201,26 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("token", build_event.kwargs)
         self.assertNotIn("token", eval_event.kwargs)
 
+    def test_release_transitions_use_frozen_routes_and_stable_idempotency(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test", release_id="rel/1")
+        actions = ("submit-review", "approve", "activate", "withdraw", "rollback")
+        with mock.patch.object(api, "authenticated", return_value={
+                "release_id": "rel/1", "status": "pending_review",
+                "contract_version": "1.0"}) as request, \
+             mock.patch.object(api, "record_flight") as record, \
+             mock.patch("builtins.print"):
+            for action in actions:
+                api.cmd_release_action(args, action)
+        self.assertEqual(len(request.call_args_list), len(actions))
+        for action, call in zip(actions, request.call_args_list):
+            self.assertEqual(call.args[1], f"/v1/dev/releases/rel%2F1/{action}")
+            self.assertEqual(call.kwargs["method"], "POST")
+            self.assertEqual(call.kwargs["body"], {})
+            self.assertTrue(call.kwargs["idempotency_key"].startswith(
+                f"agentour-release-{action}-"))
+        self.assertEqual(record.call_args_list[-1].kwargs["action"], "rollback")
+
     def test_forge_status_commands_are_documented_and_visible_in_help(self):
         guide = (PLUGIN / "guides/forge-workflow.md").read_text(encoding="utf-8")
         skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
@@ -214,6 +234,9 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("source-build-status", result.stdout)
         self.assertIn("source-eval-status", result.stdout)
+        for command in ("release-submit-review", "release-approve", "release-activate",
+                        "release-withdraw", "release-rollback"):
+            self.assertIn(command, result.stdout)
 
     def test_token_guidance_requires_dedicated_api_token(self):
         guidance = "\n".join([

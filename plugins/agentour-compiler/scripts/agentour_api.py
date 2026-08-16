@@ -57,7 +57,9 @@ FORGE_CHECKPOINT_FIELDS = frozenset({
 FORGE_CHECKPOINT_STAGES = frozenset({
     "repository_resolved", "baseline_cloned", "changes_committed", "pushed",
     "review_pending", "source_revision_created", "build_submitted",
-    "eval_submitted", "release_submitted", "completed", "commit_changed",
+    "eval_submitted", "release_submitted", "release_review_submitted",
+    "release_approved", "release_activated", "release_withdrawn",
+    "release_rolled_back", "completed", "commit_changed",
 })
 _CHECKPOINT_SECRET = re.compile(
     r"(?:\b(?:ak|at|e2b)_[A-Za-z0-9_-]{8,}\b|\bsk-[A-Za-z0-9_-]{8,}\b|"
@@ -267,6 +269,24 @@ def cmd_release_status(args):
     result = authenticated(args, f"/v1/dev/releases/{release_id}")
     record_flight("release_record_read", release_id=args.release_id,
                   status=result.get("status"), contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_release_action(args, action: str):
+    """Apply one frozen Release state transition with deterministic replay."""
+    if action not in {"submit-review", "approve", "activate", "withdraw", "rollback"}:
+        raise ValueError("unsupported release action")
+    release_id = urllib.parse.quote(args.release_id, safe="")
+    key = stable_idempotency_key(f"release-{action}", args.release_id)
+    result = authenticated(
+        args, f"/v1/dev/releases/{release_id}/{action}", method="POST", body={},
+        idempotency_key=key,
+    )
+    record_flight(
+        "release_transition_applied", release_id=args.release_id, action=action,
+        status=result.get("status"), contract_version=result.get(
+            "contract_version", FORGE_CONTRACT_VERSION),
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -1006,6 +1026,14 @@ def main():
     release.add_argument("--tag", default="")
     release_status = sub.add_parser("release-status")
     release_status.add_argument("release_id")
+    for command, help_text in (
+            ("release-submit-review", "submit a Release for review"),
+            ("release-approve", "approve a reviewed Release"),
+            ("release-activate", "activate an approved Release"),
+            ("release-withdraw", "withdraw a Release"),
+            ("release-rollback", "roll back an active Release")):
+        transition = sub.add_parser(command, help=help_text)
+        transition.add_argument("release_id")
     save_forge_checkpoint = sub.add_parser("save-forge-checkpoint")
     save_forge_checkpoint.add_argument("--path", default=".agentour/forge-checkpoint.json")
     save_forge_checkpoint.add_argument("--repository-id", required=True)
@@ -1132,6 +1160,8 @@ def main():
         cmd_release(args)
     elif args.command == "release-status":
         cmd_release_status(args)
+    elif args.command.startswith("release-") and args.command != "release-status":
+        cmd_release_action(args, args.command.removeprefix("release-"))
     elif args.command == "save-forge-checkpoint":
         cmd_save_forge_checkpoint(args)
     elif args.command == "restore-forge-checkpoint":

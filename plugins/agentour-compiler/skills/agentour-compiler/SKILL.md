@@ -158,7 +158,8 @@ old claims blindly.
 Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
 developer routes implemented by `agentour_api.py`: `repository`, `source-revision`,
 `source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
-`source-eval-status`, `release`, and `release-status`. These create
+`source-eval-status`, `release`, `release-status`, `release-submit-review`, `release-approve`,
+`release-activate`, `release-withdraw`, and `release-rollback`. These create and transition
 commands send deterministic idempotency keys, and Release sends only its public identity; Core derives
 and validates all Commit/tree/Build/Eval/Artifact lineage.
 

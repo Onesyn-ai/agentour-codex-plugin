@@ -22,12 +22,27 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   --source-revision-id <source-revision-id> --visibility <private|public>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   release-status <release-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  release-submit-review <release-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  release-approve <release-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  release-activate <release-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  release-withdraw <release-id>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  release-rollback <release-id>
 ```
 
 Every create command derives a stable `Idempotency-Key` from its immutable identifiers. Status commands
 read the existing Build/Eval resource and never submit replacement work. Release sends
 only `package_id`, `version`, `source_revision_id`, visibility, and an optional tag. Core remains the
 authority for Commit/tree/source, Build, Eval, Artifact, and gate lineage.
+
+Release transitions also use deterministic `Idempotency-Key` values. The server derives the actor,
+approval policy, current authorization, and rollback target; the Plugin never supplies an approver,
+active version, Drive object reference, or Registry override. Read `release-status` after an interrupted
+transition instead of assuming the side effect failed or submitting a different Release.
 
 Persist interruption state with:
 
