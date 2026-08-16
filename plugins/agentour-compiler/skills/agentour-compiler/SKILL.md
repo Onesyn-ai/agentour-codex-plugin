@@ -156,12 +156,19 @@ old claims blindly.
 ### 5A.1 Managed Forge source gate
 
 Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
-developer routes implemented by `agentour_api.py`: `repository`, `source-revision`,
+developer routes implemented by `agentour_api.py`: `repositories`, `repository-create`,
+`repository-status`, `repository`, `git-clone`, `git-push`, `source-revision`,
 `source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
 `source-eval-status`, `release`, `release-status`, `release-submit-review`, `release-approve`,
 `release-activate`, `release-withdraw`, and `release-rollback`. These create and transition
 commands send deterministic idempotency keys, and Release sends only its public identity; Core derives
 and validates all Commit/tree/Build/Eval/Artifact lineage.
+
+Repository creation uses `/v1/forge/repositories`. `git-clone` and `git-push` obtain a one-time
+short-lived credential from `/v1/forge/git-credentials` and pass it to Git only through a temporary
+credential-free askpass helper plus process environment. The plaintext credential must never be printed,
+recorded, added to a remote URL, written to checkpoint state, or reused. The credential exchange itself
+uses a fresh Idempotency-Key because Core intentionally returns `409` rather than replaying plaintext.
 
 After submitting Build or Eval, resume the same remote record with `source-build-status` or
 `source-eval-status`; an interrupted read is not authorization to create a replacement Job.
@@ -171,10 +178,11 @@ current remote Job ID, contract version, and stage. Restore it with `restore-for
 Commit changed, discard the old remote Job and resume from `commit_changed`. Never place a Core token,
 Git credential, URL credential, secret, or Drive credential in checkpoint state.
 
-Repository create/resolve, short-lived Git credential exchange, clone/push, and automated PR/Review
-are external blockers until Core exposes the exact public contracts listed in the guide. Do not invent
-an endpoint, use a long-lived Forgejo PAT, treat the local directory as source authority, or describe an
-unpushed Commit / missing Source Revision as published.
+Commit-detail/branch/ChangeSet/PR creation and Review reads remain external blockers until Core exposes
+the exact public contracts listed in the guide. Do not invent an endpoint, use a long-lived Forgejo PAT,
+treat the local directory as source authority, or describe an unpushed Commit / missing Source Revision
+as published. After Repository creation, wait for `repository-status` to report an active, converged
+projection before requesting Git access.
 
 ### 5B. Existing Agent inventory
 

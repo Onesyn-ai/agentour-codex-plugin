@@ -117,6 +117,170 @@ class PluginTests(unittest.TestCase):
             api.cmd_repository(args)
         request.assert_called_once_with(args, "/v1/dev/repositories/repo_1")
 
+    def test_repository_control_commands_use_contract_1_routes(self):
+        api = load_api()
+        list_args = SimpleNamespace(platform="test", cursor="cursor_1", limit=25)
+        create_args = SimpleNamespace(platform="test", kind="agent", name="agent-demo",
+                                      default_branch="main", visibility="private")
+        status_args = SimpleNamespace(platform="test", repository_id="repo/1")
+        with mock.patch.object(api, "authenticated", side_effect=[
+                {"items": [], "forge_contract_version": "1.0"},
+                {"repository_id": "repo_1", "state": "provisioning",
+                 "forge_contract_version": "1.0"},
+                {"repository_id": "repo/1", "state": "active",
+                 "forge_contract_version": "1.0"},
+            ]) as request, mock.patch.object(api, "record_flight"), \
+             mock.patch("builtins.print"):
+            api.cmd_repositories(list_args)
+            api.cmd_repository_create(create_args)
+            api.cmd_repository_status(status_args)
+        listing, creation, status = request.call_args_list
+        self.assertEqual(listing.args[1], "/v1/forge/repositories?limit=25&cursor=cursor_1")
+        self.assertEqual(creation.args[1], "/v1/forge/repositories")
+        self.assertEqual(creation.kwargs["method"], "POST")
+        self.assertEqual(creation.kwargs["body"], {
+            "kind": "agent", "canonical_name": "agent-demo",
+            "default_branch": "main", "visibility": "private",
+        })
+        self.assertTrue(creation.kwargs["idempotency_key"].startswith(
+            "agentour-repository-create-"))
+        self.assertEqual(status.args[1], "/v1/forge/repositories/repo%2F1")
+
+    def test_git_credential_exchange_is_one_time_and_never_recorded(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test", credential_ttl=900,
+                               credential_max_uses=20)
+        response = {"credential_id": "gcr_1", "username": "git-user",
+                    "credential": "gcr_1.secret-value",
+                    "clone_url": "https://forge.example.test/git/repo_1",
+                    "expires_at": "2026-08-17T00:00:00Z"}
+        with mock.patch.object(api, "authenticated", return_value=response) as request:
+            first = api.issue_git_credential(args, "repo_1", "read")
+            first_key = request.call_args.kwargs["idempotency_key"]
+            second = api.issue_git_credential(args, "repo_1", "read")
+            second_key = request.call_args.kwargs["idempotency_key"]
+        self.assertEqual(first, response)
+        self.assertEqual(second, response)
+        self.assertNotEqual(first_key, second_key)
+        self.assertTrue(first_key.startswith("agentour-git-credential-"))
+        self.assertEqual(request.call_args.args[1], "/v1/forge/git-credentials")
+        self.assertEqual(request.call_args.kwargs["body"], {
+            "repository_id": "repo_1", "action": "read",
+            "ttl_seconds": 900, "max_uses": 20,
+        })
+
+    def test_git_credential_limits_fail_before_network_exchange(self):
+        api = load_api()
+        with mock.patch.object(api, "authenticated") as request:
+            for ttl, max_uses in ((59, 20), (901, 20), (900, 0), (900, 101)):
+                with self.subTest(ttl=ttl, max_uses=max_uses), \
+                     self.assertRaises(SystemExit):
+                    api.issue_git_credential(SimpleNamespace(
+                        credential_ttl=ttl, credential_max_uses=max_uses),
+                        "repo_1", "read")
+        request.assert_not_called()
+
+    def test_git_runner_keeps_plaintext_out_of_command_and_helper_file(self):
+        api = load_api()
+        credential = {"username": "git-user", "credential": "gcr_1.secret-value"}
+        completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+        observed = {}
+        def fake_run(command, **kwargs):
+            observed["command"] = command
+            observed["environment"] = kwargs["env"]
+            observed["helper_text"] = pathlib.Path(kwargs["env"]["GIT_ASKPASS"]).read_text(
+                encoding="utf-8")
+            return completed
+        with mock.patch.object(api.subprocess, "run", side_effect=fake_run):
+            result = api.run_git_with_credential(
+                ["git", "clone", "https://forge.example.test/git/repo_1", "repo"],
+                credential, cwd=None, timeout=30)
+        self.assertIs(result, completed)
+        command = observed["command"]
+        environment = observed["environment"]
+        self.assertNotIn(credential["credential"], " ".join(command))
+        self.assertIn("credential.helper=", command)
+        self.assertTrue(any(item.startswith("core.hooksPath=") for item in command))
+        self.assertEqual(environment["AGENTOUR_GIT_CREDENTIAL"], credential["credential"])
+        self.assertNotIn(credential["credential"], observed["helper_text"])
+
+    def test_git_runner_redacts_credentials_from_failure_output(self):
+        api = load_api()
+        secret = "opaque-credential-value"
+        completed = SimpleNamespace(
+            returncode=1, stdout=f"failed {secret}",
+            stderr=" Bearer ak_example123456789")
+        with mock.patch.object(api.subprocess, "run", return_value=completed), \
+             self.assertRaises(SystemExit) as raised:
+            api.run_git_with_credential(
+                ["git", "push", "https://forge.example.test/git/repo_1", "HEAD"],
+                {"username": "git-user", "credential": secret}, cwd=None, timeout=30)
+        message = str(raised.exception)
+        self.assertNotIn(secret, message)
+        self.assertNotIn("ak_example123456789", message)
+        self.assertIn("[REDACTED]", message)
+
+    def test_git_clone_rejects_a_file_destination_before_credential_exchange(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as td:
+            destination = pathlib.Path(td) / "existing-file"
+            destination.write_text("not a directory", encoding="utf-8")
+            args = SimpleNamespace(repository_id="repo_1", destination=str(destination),
+                                   commit_sha="a" * 40)
+            with mock.patch.object(api, "issue_git_credential") as issue, \
+                 self.assertRaises(SystemExit) as raised:
+                api.cmd_git_clone(args)
+        self.assertIn("not a directory", str(raised.exception))
+        issue.assert_not_called()
+
+    def test_git_clone_redacts_checkout_failure_output(self):
+        api = load_api()
+        secret = "opaque-checkout-credential"
+        credential = {"credential_id": "gcr_1", "username": "git-user",
+                      "credential": secret,
+                      "clone_url": "https://forge.example.test/git/repo_1",
+                      "expires_at": "2026-08-17T00:00:00Z"}
+        with tempfile.TemporaryDirectory() as td:
+            destination = pathlib.Path(td) / "clone"
+            args = SimpleNamespace(repository_id="repo_1", destination=str(destination),
+                                   commit_sha="a" * 40, timeout=30)
+            with mock.patch.object(api, "issue_git_credential", return_value=credential), \
+                 mock.patch.object(api, "run_git_with_credential"), \
+                 mock.patch.object(api.subprocess, "run", return_value=SimpleNamespace(
+                     returncode=1, stdout=f"failed {secret}", stderr="")), \
+                 self.assertRaises(SystemExit) as raised:
+                api.cmd_git_clone(args)
+        self.assertNotIn(secret, str(raised.exception))
+        self.assertIn("[REDACTED]", str(raised.exception))
+
+    def test_full_commit_sha_accepts_only_sha1_or_sha256_lengths(self):
+        api = load_api()
+        self.assertTrue(api.is_full_commit_sha("a" * 40))
+        self.assertTrue(api.is_full_commit_sha("B" * 64))
+        for length in (39, 41, 63, 65):
+            with self.subTest(length=length):
+                self.assertFalse(api.is_full_commit_sha("a" * length))
+
+    def test_structured_api_error_preserves_codes_and_redacts_tokens(self):
+        api = load_api()
+        detail = json.dumps({
+            "error": "failed for Bearer ak_example123456789",
+            "error_code": "REPOSITORY_NOT_FOUND", "request_id": "req_1",
+            "correlation_id": "corr_1", "stage": "authorization",
+            "target_service": "core", "retryable": False,
+            "details": {"password": "opaque-password",
+                        "context": "github_pat_example123456789"},
+            "internal_payload": {"credential": "gcr_secret.value"},
+        })
+        message = api.format_api_error(404, detail)
+        self.assertIn("Agentour API 404", message)
+        self.assertIn("REPOSITORY_NOT_FOUND", message)
+        self.assertIn("req_1", message)
+        self.assertNotIn("ak_example123456789", message)
+        self.assertNotIn("opaque-password", message)
+        self.assertNotIn("github_pat_example123456789", message)
+        self.assertNotIn("internal_payload", message)
+
     def test_forge_creation_commands_send_stable_idempotency_keys(self):
         api = load_api()
         commit = "a" * 40
@@ -221,6 +385,21 @@ class PluginTests(unittest.TestCase):
                 f"agentour-release-{action}-"))
         self.assertEqual(record.call_args_list[-1].kwargs["action"], "rollback")
 
+    def test_release_rollback_can_bind_an_explicit_immutable_target(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test", release_id="rel_current",
+                               target_release_id="rel_previous")
+        with mock.patch.object(api, "authenticated", return_value={
+                "release_id": "rel_previous", "status": "published",
+                "contract_version": "1.0"}) as request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_release_action(args, "rollback")
+        self.assertEqual(request.call_args.kwargs["body"], {
+            "target_release_id": "rel_previous"
+        })
+        self.assertTrue(request.call_args.kwargs["idempotency_key"].startswith(
+            "agentour-release-rollback-"))
+
     def test_forge_status_commands_are_documented_and_visible_in_help(self):
         guide = (PLUGIN / "guides/forge-workflow.md").read_text(encoding="utf-8")
         skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
@@ -234,6 +413,9 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("source-build-status", result.stdout)
         self.assertIn("source-eval-status", result.stdout)
+        for command in ("repositories", "repository-create", "repository-status",
+                        "git-clone", "git-push"):
+            self.assertIn(command, result.stdout)
         for command in ("release-submit-review", "release-approve", "release-activate",
                         "release-withdraw", "release-rollback"):
             self.assertIn(command, result.stdout)
@@ -487,7 +669,9 @@ class PluginTests(unittest.TestCase):
             os.environ["AGENTOUR_COMPILER_FLIGHT_LOG"] = str(pathlib.Path(td) / "flight.json")
             try:
                 module.record("failure", error="Bearer secret-value ak_example123456789",
-                              api_key="sk-secret-value")
+                              api_key="sk-secret-value",
+                              tenant="ts_example123456789",
+                              git="gcr_example.secret-value")
                 module.record_job_sample("validation", {
                     "id": "val_1", "status": "running",
                     "report": {"heartbeat_at": 12, "stage": "smoke"}},
@@ -499,6 +683,8 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(data["events"][0]["api_key"], "[REDACTED]")
         self.assertNotIn("secret-value", json.dumps(data))
         self.assertNotIn("ak_example123456789", json.dumps(data))
+        self.assertNotIn("ts_example123456789", json.dumps(data))
+        self.assertNotIn("gcr_example.secret-value", json.dumps(data))
         self.assertEqual(data["events"][1]["poll_count"], 3)
 
     def test_forge_checkpoint_is_allowlisted_and_invalidates_changed_commit(self):
@@ -530,6 +716,11 @@ class PluginTests(unittest.TestCase):
             api.validate_forge_checkpoint({**checkpoint, "token": "ak_example123456789"})
         with self.assertRaises(ValueError):
             api.validate_forge_checkpoint({**checkpoint, "remote_job_id": "ak_example123456789"})
+        with self.assertRaises(ValueError):
+            api.validate_forge_checkpoint({**checkpoint, "remote_job_id": "ts_example123456789"})
+        with self.assertRaises(ValueError):
+            api.validate_forge_checkpoint({**checkpoint,
+                                           "remote_job_id": "gcr_example.secret-value"})
 
     def test_publishing_docs_use_unified_token_and_valid_visibility_command(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

@@ -14,9 +14,15 @@ _SECRET_KEYS = re.compile(r"(token|secret|password|api[_-]?key|credential|author
 _SECRET_VALUES = [
     re.compile(r"\bak_[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\bat_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bts_[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\be2b_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bgcr_[A-Za-z0-9._-]{8,}\b"),
+    re.compile(r"\bghp_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{8,}\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"Bearer\s+[^\s\"']+", re.I),
+    re.compile(r"https?://[^\s/@:]+:[^\s/@]+@", re.I),
 ]
 _MAX_STRING = 4000
 _MAX_EVENTS = 5000

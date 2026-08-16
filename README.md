@@ -39,11 +39,12 @@ Interrupted observation can be continued with `track-build <job-id>` without cre
 a replacement Build.
 
 Managed Forge source records use the frozen Core developer contract. The Plugin can read an existing
-Repository, create/read a fixed Source Revision, submit its Build and Eval, create/read a Release, and
-read the submitted Build/Eval status without creating replacement work, and save a credential-free
-Forge checkpoint. Repository creation, Git credential exchange, clone/push,
-and automated PR/Review remain blocked until Core exposes the required public developer APIs; local
-files must not be described as published source.
+Repository, idempotently create a managed Repository, clone or push a fixed Commit through a one-time
+Core-managed Git credential without printing or persisting it, create/read a fixed Source Revision,
+submit its Build and Eval, create/read/transition a Release, resume submitted Build/Eval records, and
+save a credential-free Forge checkpoint. Commit-detail, branch/ChangeSet/PR creation, and Review reads
+remain blocked until Core exposes those frozen public APIs; local or unpushed files must not be
+described as published source.
 
 At workflow startup the Plugin checks the latest GitHub Marketplace version. If a newer version exists it runs the Codex Plugin installer automatically, then asks you to start a new Thread so Codex loads the new code.
 

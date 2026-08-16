@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import subprocess
 import sys
 import tarfile
@@ -62,12 +63,56 @@ FORGE_CHECKPOINT_STAGES = frozenset({
     "release_rolled_back", "completed", "commit_changed",
 })
 _CHECKPOINT_SECRET = re.compile(
-    r"(?:\b(?:ak|at|e2b)_[A-Za-z0-9_-]{8,}\b|\bsk-[A-Za-z0-9_-]{8,}\b|"
-    r"Bearer\s+\S+)", re.I)
+    r"(?:\b(?:ak|at|ts|e2b|gcr|ghp)_[A-Za-z0-9._-]{8,}\b|"
+    r"\bgithub_pat_[A-Za-z0-9_]{8,}\b|\bglpat-[A-Za-z0-9_-]{8,}\b|"
+    r"\bsk-[A-Za-z0-9_-]{8,}\b|Bearer\s+[^\s\"',}]+|"
+    r"https?://[^\s/@:]+:[^\s/@]+@)", re.I)
+_SECRET_KEY = re.compile(
+    r"(?:token|secret|password|api[_-]?key|credential|authorization)", re.I)
+_FULL_COMMIT_SHA = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
 
 
 class APITransportError(RuntimeError):
     """A retryable transport failure. POST callers must not blindly resubmit."""
+
+
+def redact_sensitive(value, key: str = ""):
+    """Redact credential-shaped values and values stored under secret-bearing keys."""
+    if _SECRET_KEY.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {str(item_key): redact_sensitive(item_value, str(item_key))
+                for item_key, item_value in value.items()}
+    if isinstance(value, list):
+        return [redact_sensitive(item, key) for item in value[:500]]
+    if isinstance(value, str):
+        return _CHECKPOINT_SECRET.sub("[REDACTED]", value[:4000])
+    return value
+
+
+def redact_text(value: str, *extra_secrets: str) -> str:
+    safe = str(value)
+    for secret in sorted((str(item) for item in extra_secrets if item), key=len,
+                         reverse=True):
+        safe = safe.replace(secret, "[REDACTED]")
+    return _CHECKPOINT_SECRET.sub("[REDACTED]", safe)
+
+
+def format_api_error(status: int, detail: str) -> str:
+    """Preserve the frozen error envelope without echoing arbitrary response bodies."""
+    try:
+        payload = json.loads(detail)
+    except (TypeError, ValueError):
+        safe = redact_text(str(detail))[:1000]
+        return f"Agentour API {status}: {safe}"
+    if not isinstance(payload, dict):
+        return f"Agentour API {status}: invalid error response"
+    allowed = ("error", "error_code", "request_id", "correlation_id", "stage",
+               "target_service", "retryable", "details")
+    safe_payload = redact_sensitive(
+        {key: payload.get(key) for key in allowed if key in payload})
+    safe_text = json.dumps(safe_payload, ensure_ascii=False, separators=(",", ":"))
+    return f"Agentour API {status}: {safe_text}"
 
 
 def is_account_token(token: str) -> bool:
@@ -107,7 +152,7 @@ def request(platform: str, path: str, *, method: str = "GET",
                 continue
             if auth and exc.code in {401, 403} and not os.environ.get("AGENTOUR_TOKEN", "").strip():
                 delete_token(platform)
-            raise SystemExit(f"Agentour API {exc.code}: {detail}") from exc
+            raise SystemExit(format_api_error(exc.code, detail)) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt + 1 < attempts:
                 time.sleep(0.5 * (2 ** attempt))
@@ -173,6 +218,191 @@ def stable_idempotency_key(operation: str, *parts: str) -> str:
     return f"agentour-{label}-{digest[:40]}"
 
 
+def one_time_idempotency_key(operation: str) -> str:
+    """Create a non-replayable key for one-time plaintext credential exchange."""
+    label = re.sub(r"[^a-z0-9-]+", "-", operation.lower()).strip("-") or "create"
+    return f"agentour-{label}-{secrets.token_hex(20)}"
+
+
+def bounded_int(value: str, *, minimum: int, maximum: int, option: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(f"{option} must be an integer") from exc
+    if not minimum <= parsed <= maximum:
+        raise argparse.ArgumentTypeError(
+            f"{option} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def credential_ttl(value: str) -> int:
+    return bounded_int(value, minimum=60, maximum=900, option="--credential-ttl")
+
+
+def credential_max_uses(value: str) -> int:
+    return bounded_int(value, minimum=1, maximum=100,
+                       option="--credential-max-uses")
+
+
+def repository_limit(value: str) -> int:
+    return bounded_int(value, minimum=1, maximum=200, option="--limit")
+
+
+def is_full_commit_sha(value: str) -> bool:
+    return _FULL_COMMIT_SHA.fullmatch(str(value or "")) is not None
+
+
+def cmd_repositories(args):
+    query = urllib.parse.urlencode({"limit": args.limit, **({"cursor": args.cursor}
+                                     if args.cursor else {})})
+    result = authenticated(args, f"/v1/forge/repositories?{query}")
+    record_flight("repositories_listed", result_count=len(result.get("items") or []),
+                  contract_version=result.get("forge_contract_version", FORGE_CONTRACT_VERSION))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_repository_create(args):
+    body = {"kind": args.kind, "canonical_name": args.name,
+            "default_branch": args.default_branch, "visibility": args.visibility}
+    key = stable_idempotency_key("repository-create", args.kind, args.name.lower(),
+                                 args.default_branch, args.visibility)
+    result = authenticated(args, "/v1/forge/repositories", method="POST", body=body,
+                           idempotency_key=key)
+    record_flight("repository_create_submitted", repository_id=result.get("repository_id"),
+                  state=result.get("state"), contract_version=result.get(
+                      "forge_contract_version", FORGE_CONTRACT_VERSION))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_repository_status(args):
+    rid = urllib.parse.quote(args.repository_id, safe="")
+    result = authenticated(args, f"/v1/forge/repositories/{rid}")
+    record_flight("repository_status_read", repository_id=args.repository_id,
+                  state=result.get("state"), contract_version=result.get(
+                      "forge_contract_version", FORGE_CONTRACT_VERSION))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def issue_git_credential(args, repository_id: str, action: str) -> dict:
+    """Issue one short-lived credential without printing or recording its plaintext."""
+    if action not in {"read", "write"}:
+        raise SystemExit("Agentour Git credential action must be read or write")
+    try:
+        ttl_seconds = int(args.credential_ttl)
+        max_uses = int(args.credential_max_uses)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit("Agentour Git credential limits must be integers") from exc
+    if not 60 <= ttl_seconds <= 900:
+        raise SystemExit("--credential-ttl must be between 60 and 900")
+    if not 1 <= max_uses <= 100:
+        raise SystemExit("--credential-max-uses must be between 1 and 100")
+    body = {"repository_id": repository_id, "action": action,
+            "ttl_seconds": ttl_seconds, "max_uses": max_uses}
+    result = authenticated(args, "/v1/forge/git-credentials", method="POST", body=body,
+                           idempotency_key=one_time_idempotency_key("git-credential"))
+    required = ("credential_id", "username", "credential", "clone_url", "expires_at")
+    if any(not str(result.get(key) or "") for key in required):
+        raise SystemExit("Agentour Git credential response is incomplete")
+    parsed = urllib.parse.urlsplit(str(result["clone_url"]))
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise SystemExit("Agentour Git clone URL must be credential-free HTTPS")
+    return result
+
+
+def run_git_with_credential(command: list[str], credential: dict, *, cwd: pathlib.Path | None,
+                            timeout: float) -> subprocess.CompletedProcess:
+    """Run Git with an environment-only secret and a credential-free askpass helper."""
+    secret = str(credential["credential"])
+    username = str(credential["username"])
+    with tempfile.TemporaryDirectory(prefix="agentour-git-askpass-") as temp_dir:
+        helper_dir = pathlib.Path(temp_dir)
+        helper = helper_dir / "askpass.py"
+        helper.write_text(
+            "import os, sys\n"
+            "prompt = (sys.argv[-1] if len(sys.argv) > 1 else '').lower()\n"
+            "print(os.environ['AGENTOUR_GIT_USERNAME'] if 'username' in prompt "
+            "else os.environ['AGENTOUR_GIT_CREDENTIAL'])\n",
+            encoding="utf-8",
+        )
+        if os.name == "nt":
+            launcher = helper_dir / "askpass.cmd"
+            launcher.write_text(
+                f'@echo off\n@"{sys.executable}" "{helper}" "%~1"\n', encoding="utf-8")
+        else:
+            launcher = helper_dir / "askpass"
+            launcher.write_text(f"#!{sys.executable}\n" + helper.read_text(encoding="utf-8"),
+                                encoding="utf-8")
+            os.chmod(launcher, 0o700)
+        env = {**os.environ, "GIT_ASKPASS": str(launcher), "GIT_ASKPASS_REQUIRE": "force",
+               "GIT_TERMINAL_PROMPT": "0", "AGENTOUR_GIT_USERNAME": username,
+               "AGENTOUR_GIT_CREDENTIAL": secret}
+        safe_command = [command[0], "-c", "credential.helper=", "-c",
+                        f"core.hooksPath={helper_dir / 'disabled-hooks'}", *command[1:]]
+        result = subprocess.run(safe_command, cwd=cwd, text=True, capture_output=True,
+                                encoding="utf-8", errors="replace", timeout=timeout, env=env)
+    if result.returncode != 0:
+        safe_output = redact_text(result.stdout + result.stderr, secret)[-4000:]
+        raise SystemExit(f"Git command failed: {safe_output}")
+    return result
+
+
+def cmd_git_clone(args):
+    if not is_full_commit_sha(args.commit_sha):
+        raise SystemExit("git-clone requires a full fixed Commit SHA")
+    destination = pathlib.Path(args.destination).expanduser().resolve()
+    if destination.exists() and not destination.is_dir():
+        raise SystemExit(f"Git clone destination is not a directory: {destination}")
+    if destination.exists() and any(destination.iterdir()):
+        raise SystemExit(f"Git clone destination is not empty: {destination}")
+    credential = issue_git_credential(args, args.repository_id, "read")
+    run_git_with_credential(
+        ["git", "clone", "--no-checkout", str(credential["clone_url"]), str(destination)],
+        credential, cwd=None, timeout=args.timeout)
+    checkout = subprocess.run(["git", "-C", str(destination), "checkout", "--detach",
+                               args.commit_sha.lower()], text=True, capture_output=True,
+                              encoding="utf-8", errors="replace", timeout=args.timeout)
+    if checkout.returncode != 0:
+        safe_output = redact_text(checkout.stdout + checkout.stderr,
+                                  str(credential["credential"]))[-4000:]
+        raise SystemExit(f"Git checkout failed: {safe_output}")
+    actual = subprocess.check_output(["git", "-C", str(destination), "rev-parse", "HEAD"],
+                                     text=True, encoding="utf-8", errors="replace").strip()
+    if actual.lower() != args.commit_sha.lower():
+        raise SystemExit("Cloned Git baseline does not match the requested fixed Commit")
+    record_flight("managed_repository_cloned", repository_id=args.repository_id,
+                  commit_sha=actual.lower(), destination=str(destination))
+    print(json.dumps({"repository_id": args.repository_id, "commit_sha": actual.lower(),
+                      "destination": str(destination)}, ensure_ascii=False, indent=2))
+
+
+def cmd_git_push(args):
+    workspace = pathlib.Path(args.workspace).expanduser().resolve()
+    if not (workspace / ".git").exists():
+        raise SystemExit(f"Git workspace is invalid: {workspace}")
+    if not is_full_commit_sha(args.commit_sha):
+        raise SystemExit("git-push requires a full fixed Commit SHA")
+    branch_check = subprocess.run(["git", "check-ref-format", "--branch", args.branch],
+                                  text=True, capture_output=True, encoding="utf-8",
+                                  errors="replace")
+    if branch_check.returncode != 0:
+        raise SystemExit("git-push branch name is invalid")
+    commit_check = subprocess.run(["git", "-C", str(workspace), "cat-file", "-e",
+                                   f"{args.commit_sha}^{{commit}}"], text=True,
+                                  capture_output=True, encoding="utf-8", errors="replace")
+    if commit_check.returncode != 0:
+        raise SystemExit("git-push Commit does not exist in the local workspace")
+    credential = issue_git_credential(args, args.repository_id, "write")
+    run_git_with_credential(
+        ["git", "push", str(credential["clone_url"]),
+         f"{args.commit_sha.lower()}:refs/heads/{args.branch}"],
+        credential, cwd=workspace, timeout=args.timeout)
+    record_flight("managed_repository_pushed", repository_id=args.repository_id,
+                  commit_sha=args.commit_sha.lower(), branch=args.branch)
+    print(json.dumps({"repository_id": args.repository_id,
+                      "commit_sha": args.commit_sha.lower(), "branch": args.branch,
+                      "pushed": True}, ensure_ascii=False, indent=2))
+
+
 def cmd_repository(args):
     """Read a tenant-scoped repository summary through Core's Forge contract."""
     rid = urllib.parse.quote(args.repository_id, safe="")
@@ -184,6 +414,8 @@ def cmd_repository(args):
 
 def cmd_source_revision(args):
     """Create a fixed source revision request; the server remains authoritative."""
+    if not is_full_commit_sha(args.commit_sha):
+        raise SystemExit("source-revision requires a full fixed Commit SHA")
     rid = urllib.parse.quote(args.repository_id, safe="")
     body = {"commit_sha": args.commit_sha}
     key = stable_idempotency_key("source-revision", args.repository_id,
@@ -277,9 +509,11 @@ def cmd_release_action(args, action: str):
     if action not in {"submit-review", "approve", "activate", "withdraw", "rollback"}:
         raise ValueError("unsupported release action")
     release_id = urllib.parse.quote(args.release_id, safe="")
-    key = stable_idempotency_key(f"release-{action}", args.release_id)
+    target_release_id = (getattr(args, "target_release_id", "") if action == "rollback" else "")
+    body = ({"target_release_id": target_release_id} if target_release_id else {})
+    key = stable_idempotency_key(f"release-{action}", args.release_id, target_release_id)
     result = authenticated(
-        args, f"/v1/dev/releases/{release_id}/{action}", method="POST", body={},
+        args, f"/v1/dev/releases/{release_id}/{action}", method="POST", body=body,
         idempotency_key=key,
     )
     record_flight(
@@ -305,7 +539,7 @@ def validate_forge_checkpoint(value: dict) -> dict[str, str]:
         raise ValueError("Forge checkpoint values must be strings")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", checkpoint["repository_id"]):
         raise ValueError("Forge checkpoint repository_id is invalid")
-    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", checkpoint["commit_sha"]):
+    if not is_full_commit_sha(checkpoint["commit_sha"]):
         raise ValueError("Forge checkpoint commit_sha must be a full fixed SHA")
     if checkpoint["remote_job_id"] and not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", checkpoint["remote_job_id"]):
@@ -337,7 +571,7 @@ def read_forge_checkpoint(path: pathlib.Path, current_commit_sha: str = "") -> d
         path.expanduser().resolve().read_text(encoding="utf-8")
     ))
     if current_commit_sha:
-        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", current_commit_sha):
+        if not is_full_commit_sha(current_commit_sha):
             raise ValueError("current commit_sha must be a full fixed SHA")
         if checkpoint["commit_sha"].lower() != current_commit_sha.lower():
             checkpoint = {**checkpoint, "commit_sha": current_commit_sha.lower(),
@@ -1000,8 +1234,33 @@ def main():
     bootstrap.add_argument("--target-platform", choices=PLATFORMS)
     sub.add_parser("verify-token")
     sub.add_parser("models")
+    repositories = sub.add_parser("repositories")
+    repositories.add_argument("--cursor", default="")
+    repositories.add_argument("--limit", type=repository_limit, default=100)
+    repository_create = sub.add_parser("repository-create")
+    repository_create.add_argument("--kind", choices=("agent", "workflow", "knowledge", "eval"),
+                                   default="agent")
+    repository_create.add_argument("--name", required=True)
+    repository_create.add_argument("--default-branch", default="main")
+    repository_create.add_argument("--visibility", choices=("private", "internal"),
+                                   default="private")
+    repository_status = sub.add_parser("repository-status")
+    repository_status.add_argument("repository_id")
     repository = sub.add_parser("repository")
     repository.add_argument("repository_id")
+    for command in ("git-clone", "git-push"):
+        git_command = sub.add_parser(command)
+        git_command.add_argument("repository_id")
+        git_command.add_argument("--commit-sha", required=True)
+        git_command.add_argument("--credential-ttl", type=credential_ttl, default=900)
+        git_command.add_argument("--credential-max-uses", type=credential_max_uses,
+                                 default=20)
+        git_command.add_argument("--timeout", type=float, default=900)
+        if command == "git-clone":
+            git_command.add_argument("destination")
+        else:
+            git_command.add_argument("workspace")
+            git_command.add_argument("--branch", required=True)
     source_revision = sub.add_parser("source-revision")
     source_revision.add_argument("repository_id")
     source_revision.add_argument("commit_sha")
@@ -1034,6 +1293,8 @@ def main():
             ("release-rollback", "roll back an active Release")):
         transition = sub.add_parser(command, help=help_text)
         transition.add_argument("release_id")
+        if command == "release-rollback":
+            transition.add_argument("--target-release-id", default="")
     save_forge_checkpoint = sub.add_parser("save-forge-checkpoint")
     save_forge_checkpoint.add_argument("--path", default=".agentour/forge-checkpoint.json")
     save_forge_checkpoint.add_argument("--repository-id", required=True)
@@ -1142,8 +1403,18 @@ def main():
         cmd_verify_token(args)
     elif args.command == "models":
         cmd_models(args)
+    elif args.command == "repositories":
+        cmd_repositories(args)
+    elif args.command == "repository-create":
+        cmd_repository_create(args)
+    elif args.command == "repository-status":
+        cmd_repository_status(args)
     elif args.command == "repository":
         cmd_repository(args)
+    elif args.command == "git-clone":
+        cmd_git_clone(args)
+    elif args.command == "git-push":
+        cmd_git_push(args)
     elif args.command == "source-revision":
         cmd_source_revision(args)
     elif args.command == "source-revision-status":
