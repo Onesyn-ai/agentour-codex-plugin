@@ -1,6 +1,6 @@
 # agentour-codex-plugin 持续迭代门禁
 
-版本：`2026-08-16.v1`
+版本：`2026-08-16.v2`
 
 跨仓开发时，完整通用流程以 Agentour 主仓库的 `docs/engineering/multi-repository-iteration-playbook.md` 为准。本文件保证只检出 Plugin 时仍能执行客户端侧最低门禁。
 
@@ -30,6 +30,7 @@ python -m unittest tests/test_plugin.py
 ## 候选与发布
 
 - Plugin Commit 必须进入五仓候选清单，测试时明确目标 Core/Contract 版本。
+- 候选记录分开保存 Plugin `SOURCE_HEAD`、`TESTED_REVISION` 和目标平台各服务 `RUNTIME_REVISION`，不得因本地 Plugin HEAD 最新就假设测试环境已同步。
 - fixture 只验证客户端合同；真实平台未完成时状态保持 external gate。
 - Marketplace/Plugin 版本、manifest 和 API client 版本保持一致；更新后按缓存失效与重新安装流程验证。
 

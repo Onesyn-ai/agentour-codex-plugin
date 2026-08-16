@@ -4,7 +4,7 @@
 
 ## 多仓迭代
 
-- 涉及 Agentour Core、Company Drive、Forge 或 Tenant 的契约、联调、部署和验收时，必须完整阅读 `docs/engineering/agentour-platform-iteration.md`（版本 `2026-08-16.v1`），并在可访问 Agentour 主仓库时继续阅读其完整多仓 Playbook。
+- 涉及 Agentour Core、Company Drive、Forge 或 Tenant 的契约、联调、部署和验收时，必须完整阅读 `docs/engineering/agentour-platform-iteration.md`（版本 `2026-08-16.v2`），并在可访问 Agentour 主仓库时继续阅读其完整多仓 Playbook。
 - Plugin 是 API Consumer；服务端新字段、状态机或权限变化必须同步增加客户端正向、负向和真实候选测试。
 - 重复发生或显著耗时的问题必须优先固化为 validator、unittest、checkpoint 合同或发布校验。
 
