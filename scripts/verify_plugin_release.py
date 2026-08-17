@@ -42,7 +42,14 @@ def _json(path: pathlib.Path) -> dict:
 def _sha256(path: pathlib.Path) -> str:
     if path.is_symlink() or not path.is_file():
         raise ReleaseIntegrityError(f"required regular file is missing: {path}")
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    content = path.read_bytes()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        canonical = content
+    else:
+        canonical = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _release_files(plugin_root: pathlib.Path) -> tuple[str, ...]:

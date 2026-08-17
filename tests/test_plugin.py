@@ -99,6 +99,19 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(result["plugin_version"], json.loads(
             (PLUGIN / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))["version"])
 
+    def test_release_integrity_normalizes_text_line_endings_only(self):
+        verifier = load_release_verifier()
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            lf = root / "lf.txt"
+            crlf = root / "crlf.txt"
+            changed = root / "changed.txt"
+            lf.write_bytes(b"first\nsecond\n")
+            crlf.write_bytes(b"first\r\nsecond\r\n")
+            changed.write_bytes(b"first\nchanged\n")
+            self.assertEqual(verifier._sha256(lf), verifier._sha256(crlf))
+            self.assertNotEqual(verifier._sha256(lf), verifier._sha256(changed))
+
     def test_api_client_version_matches_installed_manifest(self):
         api = load_api()
         manifest = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
