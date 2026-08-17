@@ -17,7 +17,7 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   git-push <repository-id> <workspace> --commit-sha <full-commit-sha> --branch <branch>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  source-revision <repository-id> <full-commit-sha>
+  source-revision <repository-id> <full-commit-sha> --pull-request-number <positive-pr-number>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-revision-status <source-revision-id>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
@@ -45,7 +45,9 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   release-rollback <release-id> [--target-release-id <deprecated-release-id>]
 ```
 
-Every create command derives a stable `Idempotency-Key` from its immutable identifiers. Status commands
+Source Revision creation always sends both the exact merged Commit and its positive pull request number;
+the Plugin never creates a review-free Source Revision from a branch head or standalone Commit. Every
+create command derives a stable `Idempotency-Key` from its immutable identifiers. Status commands
 read the existing Build/Eval resource and never submit replacement work. Release sends
 only `package_id`, `version`, `source_revision_id`, visibility, and an optional tag. Core remains the
 authority for Commit/tree/source, Build, Eval, Artifact, and gate lineage.

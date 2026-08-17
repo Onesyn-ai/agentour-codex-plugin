@@ -1,6 +1,6 @@
 {
   "name": "agentour-compiler",
-  "version": "0.9.1+codex.20260817062629",
+  "version": "0.9.1+codex.20260817211203",
   "description": "Create, update or reconstruct Agentour Agents and execute resumable AIO design tasks with validation and publishing.",
   "author": {
     "name": "Agentour Platform",

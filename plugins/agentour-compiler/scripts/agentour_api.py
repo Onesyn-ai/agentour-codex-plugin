@@ -252,6 +252,11 @@ def repository_limit(value: str) -> int:
     return bounded_int(value, minimum=1, maximum=200, option="--limit")
 
 
+def pull_request_number(value: str) -> int:
+    return bounded_int(value, minimum=1, maximum=2_147_483_647,
+                       option="--pull-request-number")
+
+
 def is_full_commit_sha(value: str) -> bool:
     return _FULL_COMMIT_SHA.fullmatch(str(value or "")) is not None
 
@@ -421,13 +426,17 @@ def cmd_source_revision(args):
     if not is_full_commit_sha(args.commit_sha):
         raise SystemExit("source-revision requires a full fixed Commit SHA")
     rid = urllib.parse.quote(args.repository_id, safe="")
-    body = {"commit_sha": args.commit_sha}
+    body = {
+        "commit_sha": args.commit_sha,
+        "pull_request_number": args.pull_request_number,
+    }
     key = stable_idempotency_key("source-revision", args.repository_id,
-                                 args.commit_sha.lower())
+                                 args.commit_sha.lower(), str(args.pull_request_number))
     result = authenticated(args, f"/v1/dev/repositories/{rid}/source-revisions",
                            method="POST", body=body, idempotency_key=key)
     record_flight("source_revision_submitted", repository_id=args.repository_id,
-                  commit_sha=args.commit_sha, source_revision_id=result.get("source_revision_id"),
+                  commit_sha=args.commit_sha, pull_request_number=args.pull_request_number,
+                  source_revision_id=result.get("source_revision_id"),
                   contract_version=FORGE_CONTRACT_VERSION)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -1309,6 +1318,8 @@ def main():
     source_revision = sub.add_parser("source-revision")
     source_revision.add_argument("repository_id")
     source_revision.add_argument("commit_sha")
+    source_revision.add_argument("--pull-request-number", type=pull_request_number,
+                                 required=True)
     source_revision_status = sub.add_parser("source-revision-status")
     source_revision_status.add_argument("source_revision_id")
     source_build = sub.add_parser(

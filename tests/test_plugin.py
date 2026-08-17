@@ -413,7 +413,8 @@ class PluginTests(unittest.TestCase):
     def test_forge_creation_commands_send_stable_idempotency_keys(self):
         api = load_api()
         commit = "a" * 40
-        source_args = SimpleNamespace(platform="test", repository_id="repo_1", commit_sha=commit)
+        source_args = SimpleNamespace(platform="test", repository_id="repo_1", commit_sha=commit,
+                                      pull_request_number=42)
         build_args = SimpleNamespace(platform="test", source_revision_id="sr_1")
         release_args = SimpleNamespace(platform="test", package_id="pkg_1", version="1.2.3",
                                        source_revision_id="sr_1", visibility="private", tag="")
@@ -423,9 +424,16 @@ class PluginTests(unittest.TestCase):
             first = request.call_args
             api.cmd_source_revision(source_args)
             second = request.call_args
-        self.assertEqual(first.kwargs["body"], {"commit_sha": commit})
+        self.assertEqual(first.kwargs["body"], {"commit_sha": commit, "pull_request_number": 42})
         self.assertEqual(first.kwargs["idempotency_key"], second.kwargs["idempotency_key"])
         self.assertTrue(first.kwargs["idempotency_key"].startswith("agentour-source-revision-"))
+
+        changed_pr = SimpleNamespace(platform="test", repository_id="repo_1", commit_sha=commit,
+                                     pull_request_number=43)
+        with mock.patch.object(api, "authenticated", return_value={"source_revision_id": "sr_2"}) as changed_request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_source_revision(changed_pr)
+        self.assertNotEqual(first.kwargs["idempotency_key"], changed_request.call_args.kwargs["idempotency_key"])
 
         with mock.patch.object(api, "authenticated", side_effect=[
                 {"build_id": "bld_1"}, {"eval_run_id": "evr_1"}, {"release_id": "rel_1"}]) as request, \
