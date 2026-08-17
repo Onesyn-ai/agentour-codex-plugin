@@ -21,6 +21,8 @@ jobs:
           python-version: "3.12"
       - name: Validate manifest and restart behavior
         run: python scripts/validate_all.py
+      - name: Verify Plugin release integrity snapshot
+        run: python scripts/verify_plugin_release.py verify-source
       - name: Run plugin contract tests
         run: python -m unittest tests.test_plugin
       - name: Compile plugin scripts

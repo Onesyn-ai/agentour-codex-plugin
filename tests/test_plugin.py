@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -29,6 +30,15 @@ def load_api():
 def load_lark_preflight():
     path = PLUGIN / "scripts" / "lark_cli_preflight.py"
     spec = importlib.util.spec_from_file_location("lark_cli_preflight", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_release_verifier():
+    path = ROOT / "scripts" / "verify_plugin_release.py"
+    spec = importlib.util.spec_from_file_location("verify_plugin_release", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader
     spec.loader.exec_module(module)
@@ -80,6 +90,14 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
+        self.assertTrue(manifest["version"].startswith("0.9.1+codex."))
+
+    def test_release_integrity_snapshot_matches_candidate(self):
+        verifier = load_release_verifier()
+        result = verifier.verify_source(PLUGIN, ROOT / ".agents/plugins/marketplace.json")
+        self.assertEqual(result["plugin_name"], "agentour-compiler")
+        self.assertEqual(result["plugin_version"], json.loads(
+            (PLUGIN / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))["version"])
 
     def test_api_client_version_matches_installed_manifest(self):
         api = load_api()
@@ -99,6 +117,104 @@ class PluginTests(unittest.TestCase):
         self.assertFalse(result["updated"])
         self.assertNotIn("restart_required", result)
         installer.assert_not_called()
+
+    def test_new_patch_and_changed_cache_identity_trigger_update(self):
+        api = load_api()
+        cases = (
+            ("0.9.0+codex.old", "0.9.1+codex.new", "newer_semver"),
+            ("0.9.1+codex.old", "0.9.1+codex.new", "cache_identity_changed"),
+        )
+        for current, latest, reason in cases:
+            with self.subTest(current=current, latest=latest), \
+                 mock.patch.object(api, "PLUGIN_VERSION", current), \
+                 mock.patch.object(api.urllib.request, "urlopen") as urlopen, \
+                 mock.patch.object(api.subprocess, "run", return_value=SimpleNamespace(
+                     returncode=0, stdout="", stderr="")) as installer:
+                response = mock.MagicMock()
+                response.__enter__.return_value.read.return_value = json.dumps({
+                    "version": latest}).encode()
+                urlopen.return_value = response
+                result = api.check_update(auto=True)
+            self.assertTrue(result["outdated"])
+            self.assertTrue(result["updated"])
+            self.assertTrue(result["restart_required"])
+            self.assertEqual(result["comparison_reason"], reason)
+            self.assertEqual(installer.call_count, 2)
+
+    def test_current_newer_version_does_not_downgrade(self):
+        api = load_api()
+        outdated, reason = api.plugin_update_decision(
+            "0.9.2+codex.current", "0.9.1+codex.remote")
+        self.assertFalse(outdated)
+        self.assertEqual(reason, "current_semver_newer")
+        outdated, reason = api.plugin_update_decision(
+            "0.9.1+codex.20260817062629", "0.9.1+codex.20260816000000")
+        self.assertFalse(outdated)
+        self.assertEqual(reason, "current_cache_identity_newer")
+
+    def test_invalid_remote_plugin_version_blocks_bootstrap(self):
+        api = load_api()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"version":"not-semver"}'
+        with mock.patch.object(api.urllib.request, "urlopen", return_value=response):
+            result = api.check_update(auto=False)
+        self.assertTrue(result["blocked"])
+        self.assertFalse(result["outdated"])
+
+    def test_cache_verifier_fails_closed_on_installed_content_drift(self):
+        verifier = load_release_verifier()
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            plugin = root / "plugins/agentour-compiler"
+            marketplace = root / ".agents/plugins/marketplace.json"
+            marketplace.parent.mkdir(parents=True)
+            shutil.copytree(PLUGIN, plugin)
+            marketplace.write_text((ROOT / ".agents/plugins/marketplace.json").read_text(
+                encoding="utf-8"), encoding="utf-8")
+            snapshot = verifier.write_snapshot(plugin, marketplace)
+            cache_root = root / "cache"
+            installed = (cache_root / snapshot["marketplace_name"] /
+                         snapshot["plugin_name"] / snapshot["plugin_version"])
+            shutil.copytree(plugin, installed)
+            verified = verifier.verify_cache(plugin, marketplace, cache_root)
+            self.assertEqual(pathlib.Path(verified["installed_path"]), installed)
+            with (installed / "scripts/agentour_api.py").open("a", encoding="utf-8") as file:
+                file.write("\n# drift\n")
+            with self.assertRaises(verifier.ReleaseIntegrityError):
+                verifier.verify_cache(plugin, marketplace, cache_root)
+            shutil.copy2(plugin / "scripts/agentour_api.py",
+                         installed / "scripts/agentour_api.py")
+            (installed / "skills/agentour-compiler/STALE.md").write_text(
+                "stale", encoding="utf-8")
+            with self.assertRaises(verifier.ReleaseIntegrityError):
+                verifier.verify_cache(plugin, marketplace, cache_root)
+
+    def test_release_verifier_rejects_manifest_and_marketplace_drift(self):
+        verifier = load_release_verifier()
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            plugin = root / "plugins/agentour-compiler"
+            marketplace = root / ".agents/plugins/marketplace.json"
+            marketplace.parent.mkdir(parents=True)
+            shutil.copytree(PLUGIN, plugin)
+            marketplace.write_text((ROOT / ".agents/plugins/marketplace.json").read_text(
+                encoding="utf-8"), encoding="utf-8")
+            verifier.write_snapshot(plugin, marketplace)
+            manifest_path = plugin / ".codex-plugin/plugin.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["version"] = "0.9.2+codex.drift"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaises(verifier.ReleaseIntegrityError):
+                verifier.verify_source(plugin, marketplace)
+            manifest["version"] = json.loads((PLUGIN / ".codex-plugin/plugin.json").read_text(
+                encoding="utf-8"))["version"]
+            shutil.copy2(PLUGIN / ".codex-plugin/plugin.json", manifest_path)
+            verifier.write_snapshot(plugin, marketplace)
+            market = json.loads(marketplace.read_text(encoding="utf-8"))
+            market["plugins"][0]["source"]["path"] = "./plugins/wrong"
+            marketplace.write_text(json.dumps(market), encoding="utf-8")
+            with self.assertRaises(verifier.ReleaseIntegrityError):
+                verifier.verify_source(plugin, marketplace)
 
     def test_fixed_platform_urls(self):
         api = load_api()

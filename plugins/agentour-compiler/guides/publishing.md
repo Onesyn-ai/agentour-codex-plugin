@@ -28,3 +28,12 @@ and runtime environment variables match `manifest.secrets`.
 
 For the managed Forge Source Revision/Build/Eval/Release commands and the exact external API blockers,
 read `guides/forge-workflow.md`. Never substitute local Git state for a remote Source Revision.
+
+## Plugin release identity
+
+Every release uses a new patch version plus one `+codex.*` cache identity. Before relying on an
+installed release, run the repository's `scripts/verify_plugin_release.py verify-cache` command
+against the frozen source checkout. It must verify the exact installed manifest and critical-file
+SHA-256 values. A missing cache directory, unchanged version with changed source, or any hash mismatch
+blocks publishing. Reinstall from the configured `agentour-platform` Marketplace and start a new
+Thread only after the verifier succeeds; never copy files directly into the Codex cache.

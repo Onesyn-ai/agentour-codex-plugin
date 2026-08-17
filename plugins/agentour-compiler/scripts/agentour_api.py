@@ -70,6 +70,10 @@ _CHECKPOINT_SECRET = re.compile(
 _SECRET_KEY = re.compile(
     r"(?:token|secret|password|api[_-]?key|credential|authorization)", re.I)
 _FULL_COMMIT_SHA = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
+_PLUGIN_VERSION = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$"
+)
 
 
 class APITransportError(RuntimeError):
@@ -659,24 +663,64 @@ def cmd_models(args):
 def cmd_check_update(args):
     result = check_update(auto=args.auto)
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-    if result.get("outdated") and args.auto and not result.get("updated"):
+    if result.get("blocked") or (
+            result.get("outdated") and args.auto and not result.get("updated")):
         raise SystemExit(1)
+
+
+def _prerelease_key(value: str):
+    if not value:
+        return (1,)
+    result = [0]
+    for item in value.split("."):
+        result.append((0, int(item)) if item.isdigit() else (1, item))
+    return tuple(result)
+
+
+def plugin_version_identity(value: str) -> tuple[tuple, str]:
+    """Return SemVer precedence plus the full cache identity."""
+    match = _PLUGIN_VERSION.fullmatch(str(value or "").strip())
+    if not match:
+        raise ValueError(f"invalid Plugin version: {value!r}")
+    major, minor, patch, prerelease, _build = match.groups()
+    precedence = (int(major), int(minor), int(patch),
+                  _prerelease_key(prerelease or ""))
+    return precedence, match.group(0)
+
+
+def plugin_update_decision(current: str, latest: str) -> tuple[bool, str]:
+    """Treat a changed Codex build identity as installable at equal SemVer."""
+    current_precedence, current_identity = plugin_version_identity(current)
+    latest_precedence, latest_identity = plugin_version_identity(latest)
+    if latest_precedence > current_precedence:
+        return True, "newer_semver"
+    if latest_precedence < current_precedence:
+        return False, "current_semver_newer"
+    if latest_identity != current_identity:
+        current_cache = re.search(r"\+codex\.([0-9]{14})$", current_identity)
+        latest_cache = re.search(r"\+codex\.([0-9]{14})$", latest_identity)
+        if current_cache and latest_cache and latest_cache.group(1) < current_cache.group(1):
+            return False, "current_cache_identity_newer"
+        return True, "cache_identity_changed"
+    return False, "same_identity"
 
 
 def check_update(*, auto: bool) -> dict:
     try:
         with urllib.request.urlopen(LATEST_MANIFEST_URL, timeout=15) as response:
-            latest = str(json.loads(response.read()).get("version", "")).split("+", 1)[0]
+            latest = str(json.loads(response.read()).get("version", ""))
     except Exception as exc:
         return {"checked": False, "current": PLUGIN_VERSION,
                 "warning": f"无法检查 Plugin 更新: {exc}"}
-    current = PLUGIN_VERSION.split("+", 1)[0]
-    def version_key(value):
-        match = re.match(r"^(\d+)\.(\d+)\.(\d+)", value)
-        return tuple(map(int, match.groups())) if match else (0, 0, 0)
-    outdated = version_key(latest) > version_key(current)
-    result = {"checked": True, "current": current, "latest": latest,
-              "outdated": outdated, "updated": False}
+    try:
+        outdated, reason = plugin_update_decision(PLUGIN_VERSION, latest)
+    except ValueError as exc:
+        return {"checked": True, "current": PLUGIN_VERSION, "latest": latest,
+                "outdated": False, "updated": False, "blocked": True,
+                "error": str(exc)}
+    result = {"checked": True, "current": PLUGIN_VERSION, "latest": latest,
+              "outdated": outdated, "updated": False,
+              "comparison_reason": reason}
     if outdated and auto:
         refresh = subprocess.run(
             ["codex", "plugin", "marketplace", "upgrade", "agentour-platform"],
@@ -725,7 +769,8 @@ def cmd_bootstrap(args):
         result["restart_required"] = True
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return
-    if update.get("outdated") and not update.get("updated"):
+    if update.get("blocked") or (update.get("outdated") and
+                                 not update.get("updated")):
         result["blocked"] = True
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         raise SystemExit(1)

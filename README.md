@@ -47,6 +47,20 @@ remain blocked until Core exposes those frozen public APIs; local or unpushed fi
 described as published source.
 
 At workflow startup the Plugin checks the latest GitHub Marketplace version. If a newer version exists it runs the Codex Plugin installer automatically, then asks you to start a new Thread so Codex loads the new code.
+Patch releases and changed `+codex.*` cache identities are both treated as installable updates. A
+reachable Marketplace manifest with an invalid version blocks startup instead of silently reusing an
+unknown cache entry.
+
+After installation or upgrade, the source release can be compared with the installed Codex cache
+without printing credentials:
+
+```bash
+python3 scripts/verify_plugin_release.py verify-cache
+```
+
+The command verifies the manifest identity and SHA-256 of the API client, Compiler/Validator Skills,
+publishing contracts, and redacted flight recorder. Any missing or different cache file fails closed.
+Start a new Thread only after this verification succeeds so the newly installed Skills are loaded.
 
 ## Multiple source Agents
 
@@ -61,6 +75,11 @@ A successful build is not treated as behavioral equivalence. The Plugin compares
 ```bash
 python3 scripts/validate_all.py
 python3 -m unittest tests/test_plugin.py
+python3 scripts/verify_plugin_release.py verify-source
 ```
+
+After the final Plugin code and patch version are frozen, regenerate the tracked integrity snapshot
+once with `python3 scripts/verify_plugin_release.py write`, review it, and rerun all three commands.
+Do not regenerate the snapshot merely to hide an unexplained source or installed-cache difference.
 
 MIT licensed.
