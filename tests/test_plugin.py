@@ -770,6 +770,32 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(ensure.call_args.args[1],
                          "/v1/plugin/agents/agt_1/collection:ensure")
 
+    def test_agent_release_uses_unified_transaction(self):
+        api = load_api()
+        commit = "a" * 40
+        args = SimpleNamespace(
+            platform="test", agent_id="agt_1", version="1.2.3", source_ref="main",
+            source_revision_id="src_1", source_commit_sha=commit,
+            pull_request_number=7, required_approvals=1, release_notes="Ready",
+        )
+        operation = api.stable_idempotency_key(
+            "agent-release", "agt_1", "1.2.3", "src_1", commit)
+        response = {
+            "id": "rel_1", "operation_id": operation, "agent_id": "agt_1",
+            "version": "1.2.3", "state": "completed", "repository_id": "repo_1",
+            "source_commit_sha": commit, "main_commit_sha": commit,
+            "collection_id": "col_1", "drive_snapshot_id": "snap_1",
+            "drive_snapshot_digest": "sha256:" + "b" * 64,
+            "forge_tag_id": "tag_1", "forge_release_id": "frel_1",
+            "core_version_id": "ver_1", "completed_at": "2026-08-20T00:00:00Z",
+        }
+        with mock.patch.object(api, "authenticated", return_value=response) as request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_agent_release(args)
+        self.assertEqual(request.call_args.args[1], "/v1/plugin/agents/agt_1/releases")
+        self.assertEqual(request.call_args.kwargs["idempotency_key"], operation)
+        self.assertEqual(request.call_args.kwargs["body"]["operation_id"], operation)
+
     def test_compiler_task_commands_send_expected_contract(self):
         api = load_api()
         args = SimpleNamespace(platform="production", operation="update",

@@ -251,6 +251,13 @@ def pull_request_number(value: str) -> int:
                        option="--pull-request-number")
 
 
+def full_commit_sha(value: str) -> str:
+    normalized = str(value or "").lower()
+    if not _FULL_COMMIT_SHA.fullmatch(normalized):
+        raise argparse.ArgumentTypeError("--source-commit-sha must be a full Commit SHA")
+    return normalized
+
+
 def is_full_commit_sha(value: str) -> bool:
     return _FULL_COMMIT_SHA.fullmatch(str(value or "")) is not None
 
@@ -676,6 +683,60 @@ def cmd_release(args):
                   source_revision_id=args.source_revision_id,
                   release_id=result.get("release_id"),
                   contract_version=FORGE_CONTRACT_VERSION)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_agent_release(args):
+    """Run the one authoritative Core/Forge/Drive Agent release transaction."""
+    operation = stable_idempotency_key(
+        "agent-release", args.agent_id, args.version, args.source_revision_id,
+        args.source_commit_sha,
+    )
+    body = {
+        "operation_id": operation,
+        "version": args.version,
+        "source_ref": args.source_ref,
+        "source_revision_id": args.source_revision_id,
+        "source_commit_sha": args.source_commit_sha,
+        "pull_request_number": args.pull_request_number,
+        "required_approvals": args.required_approvals,
+        "release_notes": args.release_notes,
+    }
+    result = authenticated(
+        args,
+        f"/v1/plugin/agents/{urllib.parse.quote(args.agent_id, safe='')}/releases",
+        method="POST",
+        body=body,
+        idempotency_key=operation,
+    )
+    state = str(result.get("state") or "")
+    if (str(result.get("agent_id") or "") != args.agent_id or
+            str(result.get("version") or "") != args.version or
+            str(result.get("source_commit_sha") or "").lower() !=
+            args.source_commit_sha.lower() or
+            str(result.get("operation_id") or "") != operation or
+            not str(result.get("repository_id") or "") or
+            not str(result.get("collection_id") or "") or
+            state not in {"completed", "failed"}):
+        raise SystemExit("Agentour unified release response is invalid")
+    completed_evidence = (
+        "main_commit_sha", "drive_snapshot_id", "drive_snapshot_digest",
+        "forge_tag_id", "forge_release_id", "core_version_id", "completed_at",
+    )
+    if state == "completed" and any(not str(result.get(key) or "")
+                                      for key in completed_evidence):
+        raise SystemExit("Agentour completed release evidence is incomplete")
+    if state == "failed" and (not str(result.get("failed_stage") or "") or
+                              not str(result.get("error_code") or "")):
+        raise SystemExit("Agentour failed release evidence is incomplete")
+    record_flight(
+        "agent_release_completed",
+        package_id=args.agent_id,
+        source_revision_id=args.source_revision_id,
+        release_id=result.get("id"),
+        status=result.get("state"),
+        contract_version=FORGE_CONTRACT_VERSION,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -1569,6 +1630,17 @@ def main():
         release.add_argument("--" + name, required=True)
     release.add_argument("--visibility", choices=("private", "public"), default="private")
     release.add_argument("--tag", default="")
+    agent_release = sub.add_parser(
+        "agent-release", help="publish through the unified Core/Forge/Drive transaction")
+    agent_release.add_argument("--agent-id", required=True)
+    agent_release.add_argument("--version", required=True)
+    agent_release.add_argument("--source-ref", required=True)
+    agent_release.add_argument("--source-revision-id", required=True)
+    agent_release.add_argument("--source-commit-sha", required=True, type=full_commit_sha)
+    agent_release.add_argument("--pull-request-number", type=pull_request_number)
+    agent_release.add_argument("--required-approvals", type=lambda value: bounded_int(
+        value, minimum=0, maximum=100, option="--required-approvals"), default=0)
+    agent_release.add_argument("--release-notes", default="")
     release_status = sub.add_parser("release-status")
     release_status.add_argument("release_id")
     for command, help_text in (
@@ -1721,6 +1793,8 @@ def main():
         cmd_source_eval_status(args)
     elif args.command == "release":
         cmd_release(args)
+    elif args.command == "agent-release":
+        cmd_agent_release(args)
     elif args.command == "release-status":
         cmd_release_status(args)
     elif args.command.startswith("release-") and args.command != "release-status":

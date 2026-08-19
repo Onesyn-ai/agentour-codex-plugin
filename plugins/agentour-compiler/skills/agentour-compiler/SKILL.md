@@ -194,6 +194,21 @@ It refuses pre-existing staged changes, commits only those paths, and pushes the
 through a fresh short-lived Core credential. Never stage the entire workspace implicitly. Core—not the
 Plugin—creates immutable release Tags and Forge Releases after all source and Drive gates pass.
 
+After the pushed Commit has a fixed Source Revision and the required Pull Request/Review facts, publish
+only through the unified transaction:
+
+```bash
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  agent-release --agent-id <agent-id> --version <version> --source-ref <branch-or-ref> \
+  --source-revision-id <source-revision-id> --source-commit-sha <full-commit-sha> \
+  --pull-request-number <number> --required-approvals <count> \
+  --release-notes <text>
+```
+
+This single operation merges the reviewed change, freezes the Drive Collection snapshot, creates the
+immutable Tag and Forge Release, and records the Core Agent Version. Retry the same inputs with the same
+derived operation ID; never create a Tag, Forge Release, or platform version directly from the Plugin.
+
 ### 5B. Existing Agent inventory
 
 Inspect before asking about anything discoverable. Inventory entrypoints, Agents, prompts, skills, tools, MCP servers, sub-agents, workflows, routing, tests, examples, dependencies, environment variables, external services, files, attachments, approvals, artefacts, retries, and failures.
