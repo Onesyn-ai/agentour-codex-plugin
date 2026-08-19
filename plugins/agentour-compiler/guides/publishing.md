@@ -2,16 +2,15 @@
 
 Use the fixed selected platform URL and discover models through its public API. The Plugin must complete
 browser Authorization Code + PKCE before any authenticated operation. Access tokens are refreshed
-automatically; rotating refresh credentials live only in the operating-system credential store (or the
-permission-restricted platform fallback). Never ask for a copied Token, browser Cookie, OIDC provider
+automatically; rotating refresh credentials live only in the operating-system credential store. If no
+system credential store is available, stop and configure one; never write credentials to a plaintext
+fallback file. Never ask for a copied Token, browser Cookie, OIDC provider
 token, or `localStorage` value.
 
-Prefer asynchronous publication:
-
-```bash
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" publish-async packages/<agent-id> \
-  --visibility <private|public>
-```
+Publication uses only the `agent-release` transaction documented in `guides/forge-workflow.md` after
+source push, Source Revision and required Review facts exist. The legacy direct package upload and
+`publish-async` commands are retired because they cannot prove Repository, Drive Snapshot and Tag
+lineage.
 
 Before uploading, show the destination host, Agent ID, version, visibility, fidelity grade, and unsupported capabilities. Never publish to a remote platform without authorization.
 

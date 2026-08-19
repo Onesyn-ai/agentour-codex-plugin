@@ -31,42 +31,6 @@ def _is_wsl() -> bool:
     return path.exists() and "microsoft" in path.read_text(errors="ignore").lower()
 
 
-def _fallback_path() -> Path:
-    root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return root / "agentour" / "credentials.json"
-
-
-def _fallback_load() -> dict:
-    path = _fallback_path()
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _fallback_write(data: dict) -> None:
-    path = _fallback_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        path.parent.chmod(0o700)
-    except OSError:
-        pass
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
-    if os.name == "nt":
-        username = os.environ.get("USERNAME", "").strip()
-        if username and shutil.which("icacls"):
-            subprocess.run(
-                ["icacls", str(path), "/inheritance:r", "/grant:r", f"{username}:F"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-
-
 def _powershell() -> str | None:
     return shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
 
@@ -82,17 +46,17 @@ def _ps(script: str, *, token: str | None = None) -> subprocess.CompletedProcess
 def backend_name() -> str:
     forced = os.environ.get("AGENTOUR_CREDENTIAL_BACKEND", "").strip()
     if forced in {"environment", "windows-credential-manager", "macos-keychain",
-                  "linux-secret-service", "restricted-file"}:
+                  "linux-secret-service"}:
         return forced
     if os.environ.get("CI") or os.environ.get("AGENTOUR_CREDENTIALS_ENV_ONLY") == "1":
         return "environment"
     if sys.platform == "win32" or _is_wsl():
-        return "windows-credential-manager" if _powershell() else "restricted-file"
+        return "windows-credential-manager" if _powershell() else "unavailable"
     if sys.platform == "darwin":
-        return "macos-keychain" if shutil.which("security") else "restricted-file"
+        return "macos-keychain" if shutil.which("security") else "unavailable"
     if shutil.which("secret-tool") and os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
         return "linux-secret-service"
-    return "restricted-file"
+    return "unavailable"
 
 
 def _get_secret(platform: str) -> str:
@@ -105,19 +69,16 @@ def _get_secret(platform: str) -> str:
     if backend == "windows-credential-manager":
         script = f"$v=New-Object Windows.Security.Credentials.PasswordVault; try{{$c=$v.Retrieve('{SERVICE}','{account}');$c.RetrievePassword();[Console]::Out.Write($c.Password)}}catch{{exit 1}}"
         result = _ps(script)
-        value = result.stdout.strip() if result.returncode == 0 else ""
-        return value or str(_fallback_load().get(platform, "")).strip()
+        return result.stdout.strip() if result.returncode == 0 else ""
     if backend == "macos-keychain":
         result = subprocess.run(["security", "find-generic-password", "-s", SERVICE,
                                  "-a", account, "-w"], text=True, capture_output=True)
-        value = result.stdout.strip() if result.returncode == 0 else ""
-        return value or str(_fallback_load().get(platform, "")).strip()
+        return result.stdout.strip() if result.returncode == 0 else ""
     if backend == "linux-secret-service":
         result = subprocess.run(["secret-tool", "lookup", "service", SERVICE,
                                  "account", account], text=True, capture_output=True)
-        value = result.stdout.strip() if result.returncode == 0 else ""
-        return value or str(_fallback_load().get(platform, "")).strip()
-    return str(_fallback_load().get(platform, "")).strip()
+        return result.stdout.strip() if result.returncode == 0 else ""
+    return ""
 
 
 def _set_secret(platform: str, value: str) -> str:
@@ -133,25 +94,22 @@ def _set_secret(platform: str, value: str) -> str:
         script = f"$v=New-Object Windows.Security.Credentials.PasswordVault; try{{$old=$v.Retrieve('{SERVICE}','{account}');$v.Remove($old)}}catch{{}};$v.Add((New-Object Windows.Security.Credentials.PasswordCredential('{SERVICE}','{account}',$env:AGENTOUR_CREDENTIAL_VALUE)))"
         result = _ps(script, token=value)
         if result.returncode != 0:
-            data = _fallback_load(); data[platform] = value; _fallback_write(data)
-            return "restricted-file"
+            raise RuntimeError("Windows Credential Manager is unavailable; OAuth credentials were not stored")
     elif backend == "macos-keychain":
         subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account],
                        capture_output=True)
         result = subprocess.run(["security", "add-generic-password", "-U", "-s", SERVICE,
                                  "-a", account, "-w", value], text=True, capture_output=True)
         if result.returncode != 0:
-            data = _fallback_load(); data[platform] = value; _fallback_write(data)
-            return "restricted-file"
+            raise RuntimeError("macOS Keychain is unavailable; OAuth credentials were not stored")
     elif backend == "linux-secret-service":
         result = subprocess.run(["secret-tool", "store", "--label", "Agentour Plugin OAuth",
                                  "service", SERVICE, "account", account], input=value,
                                 text=True, capture_output=True)
         if result.returncode != 0:
-            data = _fallback_load(); data[platform] = value; _fallback_write(data)
-            return "restricted-file"
+            raise RuntimeError("Linux Secret Service is unavailable; OAuth credentials were not stored")
     else:
-        data = _fallback_load(); data[platform] = value; _fallback_write(data)
+        raise RuntimeError("an operating-system credential store is required")
     return backend
 
 
@@ -179,18 +137,13 @@ def delete_credentials(platform: str) -> None:
         subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account], capture_output=True)
     elif backend == "linux-secret-service":
         subprocess.run(["secret-tool", "clear", "service", SERVICE, "account", account], capture_output=True)
-    data = _fallback_load()
-    if platform in data:
-        data.pop(platform, None); _fallback_write(data)
 
 
 def storage_status(platform: str) -> dict:
     stored = bool(get_credentials(platform))
     backend = backend_name()
-    if stored and platform in _fallback_load():
-        backend = "restricted-file"
     return {"stored": stored, "backend": backend, "path":
-            str(_fallback_path()) if backend == "restricted-file" else "system-keychain"}
+            "environment" if backend == "environment" else "system-keychain"}
 
 
 def main() -> None:

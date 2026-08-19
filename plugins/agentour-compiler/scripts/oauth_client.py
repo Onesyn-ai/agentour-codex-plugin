@@ -18,9 +18,8 @@ from http.server import BaseHTTPRequestHandler,HTTPServer
 from credential_store import delete_credentials,get_credentials,set_credentials
 
 CLIENT_ID="agentour-codex-plugin"
-SCOPES=("openid","profile","offline_access","agent:read","agent:write",
-        "repository:read","repository:write","drive:file:read","drive:file:write",
-        "agent:publish")
+BASE_SCOPES=("openid","profile","offline_access","agent:read","agent:write",
+             "repository:read","repository:write","drive:file:read","drive:file:write")
 
 
 class OAuthClientError(RuntimeError):
@@ -46,11 +45,12 @@ def _json_request(url: str,*,data: bytes|None=None,headers: dict|None=None)->dic
     return value
 
 
-def _verify_identity(base_url: str,access_token: str,credentials: dict)->dict:
+def _verify_identity(base_url: str,access_token: str,credentials: dict,
+                     expected_scopes: set[str]|None=None)->dict:
     public=_json_request(base_url+"/v1/auth/oidc-config")
     identity=_json_request(base_url+"/v1/plugin/identity",
                            headers={"Authorization":f"Bearer {access_token}"})
-    expected_scopes=set(SCOPES)
+    expected_scopes=expected_scopes or set(BASE_SCOPES)
     if (identity.get("issuer")!=public.get("issuer") or identity.get("audience")!=CLIENT_ID or
             not str(identity.get("subject") or "") or
             not expected_scopes.issubset(set(identity.get("scopes") or [])) or
@@ -80,7 +80,8 @@ def refresh(platform: str,base_url: str,credentials: dict)->str:
     try:
         tokens=_exchange(base_url,{"grant_type":"refresh_token","client_id":CLIENT_ID,
                                    "refresh_token":credentials["refresh_token"]})
-        identity=_verify_identity(base_url,str(tokens["access_token"]),credentials)
+        expected=set(credentials.get("scopes") or BASE_SCOPES)
+        identity=_verify_identity(base_url,str(tokens["access_token"]),credentials,expected)
         set_credentials(platform,_bundle(tokens,identity))
         return str(tokens["access_token"])
     except (KeyError,OAuthClientError):
@@ -88,7 +89,9 @@ def refresh(platform: str,base_url: str,credentials: dict)->str:
         raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
 
 
-def login(platform: str,base_url: str,*,timeout: float=300)->dict:
+def login(platform: str,base_url: str,*,timeout: float=300,
+          required_scopes: tuple[str,...]=())->dict:
+    requested_scopes=tuple(dict.fromkeys((*BASE_SCOPES,*required_scopes)))
     state=secrets.token_urlsafe(32);nonce=secrets.token_urlsafe(32)
     verifier=secrets.token_urlsafe(64)
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
@@ -109,7 +112,7 @@ def login(platform: str,base_url: str,*,timeout: float=300)->dict:
     server=HTTPServer(("127.0.0.1",0),Callback);server.timeout=min(timeout,1)
     callback=f"http://127.0.0.1:{server.server_port}/oauth/callback"
     query=urllib.parse.urlencode({"response_type":"code","client_id":CLIENT_ID,
-        "redirect_uri":callback,"scope":" ".join(SCOPES),"code_challenge":challenge,
+        "redirect_uri":callback,"scope":" ".join(requested_scopes),"code_challenge":challenge,
         "code_challenge_method":"S256","state":state,"nonce":nonce,
         "device_name":host_platform.node() or "Codex Plugin"})
     authorization_url=base_url+"/v1/oauth/authorize?"+query
@@ -128,21 +131,28 @@ def login(platform: str,base_url: str,*,timeout: float=300)->dict:
     tokens=_exchange(base_url,{"grant_type":"authorization_code","client_id":CLIENT_ID,
         "code":code,"redirect_uri":callback,"code_verifier":verifier})
     if tokens.get("nonce")!=nonce:raise OAuthClientError("OAUTH_NONCE_INVALID")
-    identity=_verify_identity(base_url,str(tokens.get("access_token") or ""),{})
+    previous=get_credentials(platform)
+    identity=_verify_identity(base_url,str(tokens.get("access_token") or ""),previous,
+                              set(requested_scopes))
     credentials=_bundle(tokens,identity);set_credentials(platform,credentials)
     return {key:value for key,value in identity.items() if key not in {"access_token","refresh_token"}}
 
 
-def access_token(platform: str,base_url: str,*,interactive: bool=False)->str:
+def access_token(platform: str,base_url: str,*,interactive: bool=False,
+                 required_scopes: tuple[str,...]=())->str:
     credentials=get_credentials(platform)
-    if credentials and float(credentials.get("expires_at") or 0)>time.time()+60:
+    required=set(BASE_SCOPES).union(required_scopes)
+    granted=set(credentials.get("scopes") or []) if credentials else set()
+    if credentials and required.issubset(granted) and \
+            float(credentials.get("expires_at") or 0)>time.time()+60:
         return str(credentials["access_token"])
-    if credentials:
+    if credentials and required.issubset(granted):
         try:return refresh(platform,base_url,credentials)
         except OAuthClientError:
             if not interactive:raise
     if not interactive:raise OAuthClientError("OAUTH_AUTHORIZATION_REQUIRED")
-    login(platform,base_url)
+    login(platform,base_url,required_scopes=required_scopes)
     credentials=get_credentials(platform)
-    if not credentials:raise OAuthClientError("OAUTH_CREDENTIAL_STORAGE_FAILED")
+    if not credentials or not required.issubset(set(credentials.get("scopes") or [])):
+        raise OAuthClientError("OAUTH_CREDENTIAL_STORAGE_FAILED")
     return str(credentials["access_token"])

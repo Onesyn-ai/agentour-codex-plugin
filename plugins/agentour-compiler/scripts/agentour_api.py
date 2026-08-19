@@ -127,13 +127,15 @@ def base_url(platform: str) -> str:
 def request(platform: str, path: str, *, method: str = "GET",
             data: bytes | None = None, auth: bool = False,
             content_type: str = "application/json",
-            extra_headers: dict[str, str] | None = None):
+            extra_headers: dict[str, str] | None = None,
+            required_scopes: tuple[str, ...] = (), interactive_auth: bool = False):
     headers = {"Accept": "application/json"}
     if data is not None:
         headers["Content-Type"] = content_type
     headers.update(extra_headers or {})
     if auth:
-        try:token=access_token(platform,base_url(platform))
+        try:token=access_token(platform,base_url(platform),interactive=interactive_auth,
+                               required_scopes=required_scopes)
         except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
         headers["Authorization"] = f"Bearer {token}"
     attempts = 4 if method in {"GET", "HEAD"} else 1
@@ -199,11 +201,13 @@ def package_payload(package_dir: pathlib.Path) -> tuple[bytes, dict]:
 
 
 def authenticated(args, path: str, *, method: str = "GET", body: dict | None = None,
-                  idempotency_key: str = ""):
+                  idempotency_key: str = "", required_scopes: tuple[str, ...] = (),
+                  interactive_auth: bool = False):
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
     return request(args.platform, path, method=method, data=data, auth=True,
-                   extra_headers=headers)
+                   extra_headers=headers,required_scopes=required_scopes,
+                   interactive_auth=interactive_auth)
 
 
 def stable_idempotency_key(operation: str, *parts: str) -> str:
@@ -693,6 +697,8 @@ def cmd_agent_release(args):
         method="POST",
         body=body,
         idempotency_key=operation,
+        required_scopes=("agent:publish",),
+        interactive_auth=True,
     )
     state = str(result.get("state") or "")
     if (str(result.get("agent_id") or "") != args.agent_id or
@@ -1021,53 +1027,6 @@ def cmd_bootstrap(args):
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
     if not result["ready_for_interview"]:
         raise SystemExit(1)
-
-
-def cmd_publish(args, asynchronous: bool):
-    package = pathlib.Path(args.package).resolve()
-    if not (package / "agentour.json").is_file():
-        raise SystemExit(f"Missing agentour.json in {package}")
-    contract = authenticated(args, "/v1/dev/compiler-contract")
-    payload, stats = package_payload(package)
-    max_mb = int(contract["package"]["upload_max_mb"])
-    print(json.dumps({"archive": stats, "limit_mb": max_mb}, ensure_ascii=False), flush=True)
-    if len(payload) > max_mb * 1024 * 1024:
-        raise SystemExit(f"Clean archive is {len(payload) / 1024 / 1024:.1f}MB; limit is {max_mb}MB")
-    query = urllib.parse.urlencode({"visibility": args.visibility})
-    endpoint = ("/v1/dev/publish-async" if asynchronous else "/v1/dev/publish") + "?" + query
-    result = request(args.platform, endpoint, method="POST", data=payload, auth=True,
-                     content_type="application/gzip")
-    record_flight("publish_submitted", platform=args.platform, visibility=args.visibility,
-                  package=str(package), archive=stats, response=result)
-    print(json.dumps(result, ensure_ascii=False), flush=True)
-    job_id = result.get("job_id") if isinstance(result, dict) else None
-    if not asynchronous or not job_id or args.no_wait:
-        return
-    deadline = time.monotonic() + args.timeout
-    previous = None
-    polls = 0; unchanged_since = time.monotonic(); last_sample_at = 0.0
-    while time.monotonic() < deadline:
-        polls += 1
-        job = authenticated(args, f"/v1/dev/publish-jobs/{job_id}")
-        signature = (job.get("status"), job.get("updated_at"), job.get("error"))
-        changed = signature != previous
-        if changed:
-            unchanged_since = time.monotonic()
-            print(json.dumps(job, ensure_ascii=False), flush=True)
-            previous = signature
-            sync_flight(args)
-        if changed or time.monotonic() - last_sample_at >= 30:
-            record_job_sample("publish", job, poll_count=polls,
-                              unchanged_seconds=time.monotonic() - unchanged_since,
-                              poll_interval_seconds=args.poll_interval)
-            last_sample_at = time.monotonic()
-        if job.get("status") in {"succeeded", "failed", "cancelled", "timed_out"}:
-            sync_flight(args)
-            if job.get("status") != "succeeded":
-                raise SystemExit(1)
-            return
-        time.sleep(args.poll_interval)
-    raise SystemExit(f"Publish job {job_id} had no terminal result within {args.timeout}s")
 
 
 def cmd_build_test(args):
@@ -1686,14 +1645,6 @@ def main():
     sync_aio.add_argument("--type",default="workspace_updated");sync_aio.add_argument("--stage",default="designing")
     sync_aio.add_argument("--message",default="AIO 工作区已同步");sync_aio.add_argument("--progress",type=int,default=0)
     submit_aio.add_argument("task_id");submit_aio.add_argument("--result",required=True)
-    for name in ("publish", "publish-async"):
-        publish = sub.add_parser(name)
-        publish.add_argument("package")
-        publish.add_argument("--visibility", choices=("private", "public"), required=True)
-        if name == "publish-async":
-            publish.add_argument("--no-wait", action="store_true")
-            publish.add_argument("--timeout", type=float, default=1800)
-            publish.add_argument("--poll-interval", type=float, default=2)
     args = parser.parse_args()
     if args.command == "platforms":
         print(json.dumps(PLATFORMS, ensure_ascii=False, indent=2))
@@ -1810,10 +1761,6 @@ def main():
         cmd_pull_aio_workspace(args)
     elif args.command == "sync-aio-workspace":
         cmd_sync_aio_workspace(args)
-    elif args.command == "publish":
-        cmd_publish(args, False)
-    else:
-        cmd_publish(args, True)
 
 
 if __name__ == "__main__":

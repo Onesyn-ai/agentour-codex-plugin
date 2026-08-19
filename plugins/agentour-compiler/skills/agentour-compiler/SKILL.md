@@ -105,7 +105,8 @@ entropy PKCE S256 verifier/challenge plus state and nonce, and opens the selecte
 page. The user signs in through Logto and approves there. The Plugin validates issuer, audience,
 subject, scope, expiry, state and nonce before continuing. Refresh Token rotation and replay handling
 are automatic. The credential script selects Windows Credential Manager, macOS Keychain, Linux Secret
-Service, WSL bridging, or a permission-restricted fallback, separated by testing/production.
+Service, or WSL bridging, separated by testing/production. If no operating-system credential store is
+available, stop; never persist OAuth credentials in a plaintext fallback file.
 
 Validate or reauthorize immediately:
 
@@ -449,11 +450,8 @@ status before starting another paid Build.
 If polling is interrupted or the local command times out, resume that exact paid Job with
 `track-build <job-id>`; never resubmit merely because observation stopped.
 
-```bash
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <test|production> publish-async packages/<agent-id> \
-  --visibility <private|public>
-```
+Use only the `agent-release` command defined in §5A.1. Direct `publish`/`publish-async` package upload is
+retired and must never be used as a publication fallback.
 
 Follow every job. On Gate failure, fix, bump the version when required, rebuild fidelity evidence, and retry. Finish with final platform status and Package identifiers.
 

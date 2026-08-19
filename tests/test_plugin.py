@@ -747,6 +747,8 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[1], "/v1/plugin/agents/agt_1/releases")
         self.assertEqual(request.call_args.kwargs["idempotency_key"], operation)
         self.assertEqual(request.call_args.kwargs["body"]["operation_id"], operation)
+        self.assertEqual(request.call_args.kwargs["required_scopes"], ("agent:publish",))
+        self.assertTrue(request.call_args.kwargs["interactive_auth"])
 
     def test_compiler_task_commands_send_expected_contract(self):
         api = load_api()
@@ -902,28 +904,18 @@ class PluginTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader
         spec.loader.exec_module(module)
-        with tempfile.TemporaryDirectory() as temp:
-            old = {key: os.environ.get(key) for key in ("XDG_CONFIG_HOME", "AGENTOUR_CREDENTIAL_BACKEND")}
-            os.environ["XDG_CONFIG_HOME"] = temp
-            os.environ["AGENTOUR_CREDENTIAL_BACKEND"] = "restricted-file"
-            try:
-                bundle=lambda subject:{"credential_type":"oauth_public_client_v1",
-                    "client_id":"agentour-codex-plugin","access_token":"oa_access",
-                    "refresh_token":"or_refresh","expires_at":9999999999,
-                    "issuer":"https://identity.test","subject":subject,"scopes":["openid"]}
-                module.set_credentials("test",bundle("test-user"))
-                module.set_credentials("production",bundle("prod-user"))
-                self.assertEqual(module.get_credentials("test")["subject"],"test-user")
-                self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
-                module.delete_credentials("test")
-                self.assertEqual(module.get_credentials("test"),{})
-                self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
-            finally:
-                for key, value in old.items():
-                    if value is None: os.environ.pop(key, None)
-                    else: os.environ[key] = value
+        bundle=lambda subject:json.dumps({"credential_type":"oauth_public_client_v1",
+            "client_id":"agentour-codex-plugin","access_token":"oa_access",
+            "refresh_token":"or_refresh","expires_at":9999999999,
+            "issuer":"https://identity.test","subject":subject,"scopes":["openid"]})
+        with mock.patch.dict(os.environ, {
+                "AGENTOUR_CREDENTIAL_BACKEND":"environment",
+                "AGENTOUR_OAUTH_BUNDLE_TEST":bundle("test-user"),
+                "AGENTOUR_OAUTH_BUNDLE_PRODUCTION":bundle("prod-user")}, clear=False):
+            self.assertEqual(module.get_credentials("test")["subject"],"test-user")
+            self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
 
-    def test_failed_wsl_keychain_falls_back_to_stable_restricted_file(self):
+    def test_failed_keychain_never_writes_plaintext_fallback(self):
         path = PLUGIN / "scripts/credential_store.py"
         spec = importlib.util.spec_from_file_location("credential_store_fallback", path)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -935,13 +927,11 @@ class PluginTests(unittest.TestCase):
             bundle={"credential_type":"oauth_public_client_v1","client_id":"agentour-codex-plugin",
                 "access_token":"oa_access","refresh_token":"or_refresh","expires_at":9999999999,
                 "issuer":"https://identity.test","subject":"user","scopes":["openid"]}
-            self.assertEqual(module.set_credentials("production",bundle),"restricted-file")
-            self.assertEqual(module.get_credentials("production")["subject"],"user")
+            with self.assertRaisesRegex(RuntimeError, "Credential Manager is unavailable"):
+                module.set_credentials("production",bundle)
+            self.assertEqual(module.get_credentials("production"),{})
             credential = pathlib.Path(temp) / "agentour/credentials.json"
-            if os.name == "nt":
-                self.assertTrue(credential.is_file())
-            else:
-                self.assertEqual(credential.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(credential.exists())
 
     def test_package_tarball(self):
         api = load_api()
