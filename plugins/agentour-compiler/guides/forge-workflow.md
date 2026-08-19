@@ -13,6 +13,9 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   repository <repository-id>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  agent-source-prepare <workspace> --agent-id <agent-id> --name <canonical-name> \
+  [--repository-id <repository-id>] [--ref <commit-or-tag-or-branch>] [--use-local]
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   git-clone <repository-id> <destination> --commit-sha <full-commit-sha>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   git-push <repository-id> <workspace> --commit-sha <full-commit-sha> --branch <branch>
@@ -57,6 +60,13 @@ plaintext Git credential. Each wrapper invocation uses one fresh Idempotency-Key
 only in the Git subprocess environment, uses a credential-free HTTPS clone URL, and never writes the
 secret to the Package, checkpoint, flight recorder, command line, or any Git remote URL. `git clone`
 may create the normal credential-free `origin` remote.
+
+`agent-source-prepare` is the normal entry for creating or updating Agent source. It resolves only
+Repositories owned by the authenticated Core identity, creates a personal Repository when no exact
+owned canonical-name match exists, and persists only the immutable Agent/Repository binding in
+`.agentour/source.json`. It never guesses from a folder name. Explicit refs win; otherwise a proven
+local binding wins, followed by the latest default branch. Clean workspaces may fast-forward. Dirty,
+locally-ahead, and diverged workspaces are preserved and require an explicit safe resolution.
 
 Release transitions also use deterministic `Idempotency-Key` values. The server derives the actor,
 approval policy and current authorization. Rollback may optionally name one immutable deprecated

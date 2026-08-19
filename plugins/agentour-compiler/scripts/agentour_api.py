@@ -406,6 +406,121 @@ def cmd_git_push(args):
                       "pushed": True}, ensure_ascii=False, indent=2))
 
 
+def _git(workspace: pathlib.Path, *arguments: str, check: bool = True) -> str:
+    result = subprocess.run(["git", "-C", str(workspace), *arguments], text=True,
+                            capture_output=True, encoding="utf-8", errors="replace")
+    if check and result.returncode != 0:
+        raise SystemExit("Git workspace operation failed: " +
+                         redact_text(result.stdout + result.stderr)[-4000:])
+    return result.stdout.strip()
+
+
+def _source_metadata_path(workspace: pathlib.Path) -> pathlib.Path:
+    return workspace / ".agentour" / "source.json"
+
+
+def _read_source_metadata(workspace: pathlib.Path) -> dict:
+    path = _source_metadata_path(workspace)
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit("Agentour source metadata is invalid") from exc
+    allowed = {"agent_id", "repository_id", "default_branch", "contract_version"}
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise SystemExit("Agentour source metadata contains unsupported fields")
+    return value
+
+
+def _write_source_metadata(workspace: pathlib.Path, *, agent_id: str,
+                           repository_id: str, default_branch: str) -> None:
+    path = _source_metadata_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"agent_id": agent_id, "repository_id": repository_id,
+                                "default_branch": default_branch,
+                                "contract_version": FORGE_CONTRACT_VERSION},
+                               ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _repository_for_source(args) -> dict:
+    if args.repository_id:
+        rid = urllib.parse.quote(args.repository_id, safe="")
+        result = authenticated(args, f"/v1/forge/repositories/{rid}")
+        if str(result.get("repository_id") or "") != args.repository_id:
+            raise SystemExit("Core returned a different Repository identity")
+        return result
+    query = urllib.parse.urlencode({"limit": 200})
+    listed = authenticated(args, f"/v1/forge/repositories?{query}")
+    matches = [item for item in (listed.get("items") or [])
+               if str(item.get("canonical_name") or item.get("name") or "") == args.name]
+    if len(matches) > 1:
+        raise SystemExit("Multiple owned Repositories match this Agent; specify --repository-id")
+    if matches:
+        return matches[0]
+    body = {"kind": "agent", "canonical_name": args.name,
+            "default_branch": args.default_branch, "visibility": "private"}
+    return authenticated(args, "/v1/forge/repositories", method="POST", body=body,
+                         idempotency_key=stable_idempotency_key(
+                             "agent-source", args.agent_id, args.name, args.default_branch))
+
+
+def cmd_agent_source_prepare(args):
+    """Resolve/create the owned Repository and safely prepare an update workspace."""
+    workspace = pathlib.Path(args.workspace).expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    repository = _repository_for_source(args)
+    repository_id = str(repository.get("repository_id") or "")
+    if not repository_id:
+        raise SystemExit("Core Repository response has no immutable Repository ID")
+    default_branch = str(repository.get("default_branch") or args.default_branch)
+    metadata = _read_source_metadata(workspace)
+    if metadata and (str(metadata.get("agent_id")) != args.agent_id or
+                     str(metadata.get("repository_id")) != repository_id):
+        raise SystemExit("Local Agent/Repository binding conflicts with the resolved Repository")
+    git_dir = workspace / ".git"
+    if not git_dir.exists():
+        if any(item.name != ".agentour" for item in workspace.iterdir()):
+            _git(workspace, "init", "-b", default_branch)
+        else:
+            credential = issue_git_credential(args, repository_id, "read")
+            run_git_with_credential(
+                ["git", "clone", "--branch", default_branch, "--single-branch",
+                 str(credential["clone_url"]), str(workspace)],
+                credential, cwd=None, timeout=args.timeout)
+            if args.ref:
+                run_git_with_credential(
+                    ["git", "fetch", "--no-tags", str(credential["clone_url"]), args.ref],
+                    credential, cwd=workspace, timeout=args.timeout)
+                _git(workspace, "checkout", "--detach", "FETCH_HEAD")
+    else:
+        dirty = bool(_git(workspace, "status", "--porcelain"))
+        if dirty and not args.use_local:
+            raise SystemExit("Workspace has local changes; use --use-local or commit them before updating")
+        credential = issue_git_credential(args, repository_id, "read")
+        refspec = args.ref or default_branch
+        run_git_with_credential(["git", "fetch", "--no-tags", str(credential["clone_url"]),
+                                 refspec], credential, cwd=workspace, timeout=args.timeout)
+        remote_commit = _git(workspace, "rev-parse", "FETCH_HEAD")
+        local_commit = _git(workspace, "rev-parse", "HEAD", check=False)
+        if local_commit and not dirty:
+            base = _git(workspace, "merge-base", local_commit, remote_commit, check=False)
+            if base == local_commit and local_commit != remote_commit:
+                _git(workspace, "merge", "--ff-only", remote_commit)
+            elif base not in {local_commit, remote_commit}:
+                raise SystemExit("Local and remote source diverged; choose merge, rebase, or a new branch")
+        elif not local_commit:
+            _git(workspace, "checkout", "--detach", remote_commit)
+    _write_source_metadata(workspace, agent_id=args.agent_id,
+                           repository_id=repository_id, default_branch=default_branch)
+    commit = _git(workspace, "rev-parse", "HEAD", check=False)
+    record_flight("agent_source_prepared", repository_id=repository_id,
+                  commit_sha=commit, agent_id=args.agent_id)
+    print(json.dumps({"agent_id": args.agent_id, "repository_id": repository_id,
+                      "workspace": str(workspace), "commit_sha": commit or None,
+                      "default_branch": default_branch}, ensure_ascii=False, indent=2))
+
+
 def cmd_repository(args):
     """Read a tenant-scoped repository summary through Core's Forge contract."""
     rid = urllib.parse.quote(args.repository_id, safe="")
@@ -1293,6 +1408,20 @@ def main():
     repository_status.add_argument("repository_id")
     repository = sub.add_parser("repository")
     repository.add_argument("repository_id")
+    source_prepare = sub.add_parser("agent-source-prepare")
+    source_prepare.add_argument("workspace")
+    source_prepare.add_argument("--agent-id", required=True)
+    source_prepare.add_argument("--name", required=True)
+    source_prepare.add_argument("--repository-id", default="")
+    source_prepare.add_argument("--default-branch", default="main")
+    source_prepare.add_argument("--ref", default="",
+                                help="explicit Commit, Tag, or Branch baseline")
+    source_prepare.add_argument("--use-local", action="store_true",
+                                help="preserve the current dirty local workspace as source")
+    source_prepare.add_argument("--credential-ttl", type=credential_ttl, default=900)
+    source_prepare.add_argument("--credential-max-uses", type=credential_max_uses,
+                                default=20)
+    source_prepare.add_argument("--timeout", type=float, default=900)
     for command in ("git-clone", "git-push"):
         git_command = sub.add_parser(command)
         git_command.add_argument("repository_id")
@@ -1458,6 +1587,8 @@ def main():
         cmd_repository_status(args)
     elif args.command == "repository":
         cmd_repository(args)
+    elif args.command == "agent-source-prepare":
+        cmd_agent_source_prepare(args)
     elif args.command == "git-clone":
         cmd_git_clone(args)
     elif args.command == "git-push":

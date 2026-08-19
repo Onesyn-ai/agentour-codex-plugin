@@ -154,7 +154,7 @@ old claims blindly.
 
 Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
 developer routes implemented by `agentour_api.py`: `repositories`, `repository-create`,
-`repository-status`, `repository`, `git-clone`, `git-push`, `source-revision`,
+`repository-status`, `repository`, `agent-source-prepare`, `git-clone`, `git-push`, `source-revision`,
 `source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
 `source-eval-status`, `release`, `release-status`, `release-submit-review`, `release-approve`,
 `release-activate`, `release-withdraw`, and `release-rollback`. These create and transition
@@ -180,6 +180,15 @@ the exact public contracts listed in the guide. Do not invent an endpoint, use a
 treat the local directory as source authority, or describe an unpushed Commit / missing Source Revision
 as published. After Repository creation, wait for `repository-status` to report an active, converged
 projection before requesting Git access.
+
+For both new Agents and “更新我的 xxx Agent”, run `agent-source-prepare` with the immutable Agent ID
+and canonical name. Pass `--repository-id` whenever Core already binds the Agent to a Repository.
+Baseline priority is strict: an explicit `--ref` (full Commit, immutable Tag, or Branch), then a valid
+local `.agentour/source.json` Agent ID + Repository ID binding, then the latest remote default branch.
+Never infer a Repository from the directory name. A dirty local workspace is preserved and requires
+the explicit `--use-local` choice; it must never be reset. Fast-forward a clean workspace only when
+the fetched Commit proves ancestry. If local and remote diverge, stop for merge, rebase, or a new
+branch. A locally-ahead Commit remains local authority and must not be discarded.
 
 ### 5B. Existing Agent inventory
 

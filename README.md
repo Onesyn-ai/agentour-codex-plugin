@@ -46,6 +46,10 @@ save a credential-free Forge checkpoint. Commit-detail, branch/ChangeSet/PR crea
 remain blocked until Core exposes those frozen public APIs; local or unpushed files must not be
 described as published source.
 
+New and existing Agents use `agent-source-prepare` to bind an immutable Agent ID to the authenticated
+user's Repository. “更新我的 Agent” can start from an explicit Commit/Tag/Branch, a verified local
+binding, or the latest default branch. Dirty or diverged local work is never reset or silently replaced.
+
 At workflow startup the Plugin checks the latest GitHub Marketplace version. If a newer version exists it runs the Codex Plugin installer automatically, then asks you to start a new Thread so Codex loads the new code.
 Patch releases and changed `+codex.*` cache identities are both treated as installable updates. A
 reachable Marketplace manifest with an invalid version blocks startup instead of silently reusing an

@@ -298,6 +298,23 @@ class PluginTests(unittest.TestCase):
             "ttl_seconds": 900, "max_uses": 20,
         })
 
+    def test_agent_source_metadata_is_closed_and_binds_agent_to_repository(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as td:
+            workspace = pathlib.Path(td)
+            api._write_source_metadata(workspace, agent_id="agt_1",
+                                       repository_id="repo_1", default_branch="main")
+            self.assertEqual(api._read_source_metadata(workspace), {
+                "agent_id": "agt_1", "repository_id": "repo_1",
+                "default_branch": "main", "contract_version": "1.0",
+            })
+            path = workspace / ".agentour/source.json"
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["clone_url"] = "https://forge.example.test/repo_1"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                api._read_source_metadata(workspace)
+
     def test_git_credential_limits_fail_before_network_exchange(self):
         api = load_api()
         with mock.patch.object(api, "authenticated") as request:
@@ -551,7 +568,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn("source-build-status", result.stdout)
         self.assertIn("source-eval-status", result.stdout)
         for command in ("repositories", "repository-create", "repository-status",
-                        "git-clone", "git-push"):
+                        "agent-source-prepare", "git-clone", "git-push"):
             self.assertIn(command, result.stdout)
         for command in ("release-submit-review", "release-approve", "release-activate",
                         "release-withdraw", "release-rollback"):
