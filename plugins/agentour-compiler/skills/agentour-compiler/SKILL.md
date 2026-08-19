@@ -257,20 +257,22 @@ next highest-value single question must be:
 
 > 这个 Agent 是否需要使用你自己的参考资料或数据？如果需要，请提供本地文件路径，或说明它们来自网页、仓库、数据库还是现有 MCP；如果不需要，直接回答“不需要”。
 
-When local files are provided, upload them to that developer's Agentour knowledge space before Package
-generation:
+When local files are provided, upload them to the authenticated user's Drive and associate each File
+with the current Agent Collection before Package generation:
 
 ```bash
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  upload-references <file> [<file> ...]
+  upload-references --agent-id <agent-id> --repository-id <repository-id> \
+  <file> [<file> ...]
 ```
 
-Then call `/v1/plugin/knowledge/discover`, evaluate whether to reuse, extend, compose, or create the
-resulting asset, and record only the channel-neutral `knowledge` requirement in the Package. Never copy
-private source content or account-specific Asset IDs into the Package. Sensitive material remains owned
-by the user's knowledge space and is exposed to Runtime only through the scoped Knowledge MCP Gateway.
+The Plugin first ensures Core's immutable Agent↔Repository↔Collection binding, then uploads through
+Core's OAuth facade; only Core holds Drive service credentials. Drive deduplicates identical bytes only
+inside the same owner security domain while keeping separate visible File metadata. Never copy private
+source content or account-specific File IDs into the Package. Runtime receives only the Collection scope
+injected by Core; the Agent must not choose arbitrary Collection or File IDs.
 For changing or live data, prefer a read-only connector/MCP source instead of taking a one-time file
-snapshot. Record the user's decision and uploaded source IDs in compiler state so resumed runs do not ask
+snapshot. Record the user's decision and returned File IDs in compiler state so resumed runs do not ask
 again or upload duplicates.
 
 ### Mandatory Feishu channel capability gate

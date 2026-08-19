@@ -1345,23 +1345,60 @@ def cmd_restore_checkpoint(args):
 
 
 def cmd_upload_references(args):
-    try:token=access_token(args.platform,base_url(args.platform))
-    except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
-    uploaded=[]
+    binding_operation = stable_idempotency_key(
+        "agent-collection", args.agent_id, args.repository_id)
+    binding = authenticated(
+        args,
+        f"/v1/plugin/agents/{urllib.parse.quote(args.agent_id, safe='')}/collection:ensure",
+        method="POST",
+        body={"repository_id": args.repository_id, "operation_id": binding_operation},
+        idempotency_key=binding_operation,
+    )
+    if (str(binding.get("agent_id") or "") != args.agent_id or
+            str(binding.get("repository_id") or "") != args.repository_id or
+            not str(binding.get("collection_id") or "")):
+        raise SystemExit("Agentour Collection binding response is invalid")
+    try:
+        token = access_token(args.platform, base_url(args.platform))
+    except OAuthClientError as exc:
+        raise SystemExit(str(exc)) from exc
+    uploaded = []
     for raw in args.files:
-        path=pathlib.Path(raw).expanduser().resolve()
-        if not path.is_file():raise SystemExit(f"Reference file does not exist: {path}")
-        mime=__import__("mimetypes").guess_type(path.name)[0] or "application/octet-stream"
-        headers={"Authorization":f"Bearer {token}","Content-Type":mime,
-                 "X-Filename":urllib.parse.quote(path.name),"Accept":"application/json"}
-        req=urllib.request.Request(base_url(args.platform)+"/v1/dev/knowledge/sources/files",
-            data=path.read_bytes(),headers=headers,method="POST")
+        path = pathlib.Path(raw).expanduser().resolve()
+        if not path.is_file():
+            raise SystemExit(f"Reference file does not exist: {path}")
+        content = path.read_bytes()
+        if not 1 <= len(content) <= 100 * 1024 * 1024:
+            raise SystemExit(f"Reference file size must be between 1 byte and 100 MiB: {path}")
+        mime = __import__("mimetypes").guess_type(path.name)[0] or "application/octet-stream"
+        digest = hashlib.sha256(content).hexdigest()
+        operation = stable_idempotency_key(
+            "agent-reference", args.agent_id, args.repository_id, path.name, digest)
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": mime,
+                   "Content-Length": str(len(content)),
+                   "X-Filename": urllib.parse.quote(path.name, safe=""),
+                   "Idempotency-Key": operation, "Accept": "application/json"}
+        req = urllib.request.Request(
+            base_url(args.platform) +
+            f"/v1/plugin/agents/{urllib.parse.quote(args.agent_id, safe='')}/files:upload",
+            data=content, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req,timeout=180) as response:uploaded.append(json.loads(response.read()))
+            with urllib.request.urlopen(req, timeout=180) as response:
+                result = json.loads(response.read())
         except urllib.error.HTTPError as exc:
-            raise SystemExit(f"Agentour API {exc.code}: {exc.read().decode('utf-8','replace')}") from exc
-    result=authenticated(args,"/v1/dev/knowledge/sources/files/finalize-batch",method="POST",body={})
-    print(json.dumps({"uploaded":uploaded,"assets":result.get("assets",[])},ensure_ascii=False,indent=2))
+            detail = exc.read().decode("utf-8", "replace")
+            raise SystemExit(format_api_error(exc.code, detail)) from exc
+        if (str(result.get("agent_id") or "") != args.agent_id or
+                str(result.get("collection_id") or "") != binding["collection_id"] or
+                str(result.get("content_digest") or "") != "sha256:" + digest or
+                not str(result.get("file_id") or "") or
+                not str(result.get("file_version_id") or "")):
+            raise SystemExit("Agentour reference upload response is invalid")
+        uploaded.append(result)
+    print(json.dumps({"agent_id": args.agent_id,
+                      "repository_id": args.repository_id,
+                      "collection_id": binding["collection_id"],
+                      "uploaded": uploaded}, ensure_ascii=False, indent=2))
 
 
 def cmd_complete_fix(args):
@@ -1607,6 +1644,8 @@ def main():
     restore.add_argument("task_id")
     restore.add_argument("destination")
     references=sub.add_parser("upload-references")
+    references.add_argument("--agent-id", required=True)
+    references.add_argument("--repository-id", required=True)
     references.add_argument("files",nargs="+")
     resolve_update = sub.add_parser("resolve-update-intent")
     resolve_update.add_argument("target")

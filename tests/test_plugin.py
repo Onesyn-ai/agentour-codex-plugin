@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import pathlib
@@ -740,24 +741,34 @@ class PluginTests(unittest.TestCase):
             self.assertNotEqual(rejected.returncode,0)
             self.assertIn("Agentour owns Feishu application credentials",rejected.stdout)
 
-    def test_reference_upload_uses_developer_knowledge_endpoints(self):
+    def test_reference_upload_uses_agent_drive_collection(self):
         api = load_api()
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps({
-            "id": "ksi_1", "source_id": "ksrc_1"
+            "agent_id": "agt_1", "collection_id": "col_1", "file_id": "fil_1",
+            "file_version_id": "filv_1", "content_digest":
+            "sha256:" + hashlib.sha256(b"# Expert").hexdigest(),
         }).encode()
         with tempfile.TemporaryDirectory() as temp:
             reference = pathlib.Path(temp) / "expert.md"
             reference.write_text("# Expert", encoding="utf-8")
-            args = SimpleNamespace(platform="test", files=[str(reference)])
+            args = SimpleNamespace(platform="test", agent_id="agt_1",
+                                   repository_id="repo_1", files=[str(reference)])
             with mock.patch.object(api,"access_token",return_value="oa_access"), \
                  mock.patch.object(api.urllib.request, "urlopen", return_value=response) as upload, \
-                 mock.patch.object(api, "authenticated", return_value={"assets": [{"id": "kas_1"}]}) as finalize, \
+                 mock.patch.object(api, "authenticated", return_value={
+                     "agent_id": "agt_1", "repository_id": "repo_1",
+                     "collection_id": "col_1"}) as ensure, \
                  mock.patch("builtins.print"):
                 api.cmd_upload_references(args)
-        self.assertIn("/v1/dev/knowledge/sources/files", upload.call_args.args[0].full_url)
-        self.assertEqual(finalize.call_args.args[1],
-                         "/v1/dev/knowledge/sources/files/finalize-batch")
+        request = upload.call_args.args[0]
+        self.assertIn("/v1/plugin/agents/agt_1/files:upload", request.full_url)
+        self.assertEqual(request.headers["Idempotency-key"],
+                         api.stable_idempotency_key(
+                             "agent-reference", "agt_1", "repo_1", "expert.md",
+                             hashlib.sha256(b"# Expert").hexdigest()))
+        self.assertEqual(ensure.call_args.args[1],
+                         "/v1/plugin/agents/agt_1/collection:ensure")
 
     def test_compiler_task_commands_send_expected_contract(self):
         api = load_api()
