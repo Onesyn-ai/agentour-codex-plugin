@@ -871,12 +871,14 @@ class PluginTests(unittest.TestCase):
             api.validate_forge_checkpoint({**checkpoint,
                                            "remote_job_id": "gcr_example.secret-value"})
 
-    def test_publishing_docs_use_browser_oauth_and_valid_visibility_command(self):
+    def test_publishing_docs_use_browser_oauth_and_retire_legacy_visibility_command(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         guide = (PLUGIN / "guides/publishing.md").read_text(encoding="utf-8")
         self.assertIn("Authorization Code + PKCE",readme)
         self.assertNotIn("Enter an Agentour access token",readme)
-        self.assertIn("--visibility <private|public>", guide)
+        self.assertNotIn("--visibility <private|public>", guide)
+        self.assertIn("agent-release", guide)
+        self.assertIn("legacy direct package upload", guide)
 
     def test_default_flight_log_is_outside_package(self):
         script = PLUGIN / "scripts/flight_recorder.py"
