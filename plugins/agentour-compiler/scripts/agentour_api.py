@@ -465,11 +465,26 @@ def _repository_for_source(args) -> dict:
                              "agent-source", args.agent_id, args.name, args.default_branch))
 
 
+def _wait_repository_active(args, repository: dict) -> dict:
+    repository_id = str(repository.get("repository_id") or "")
+    deadline = time.monotonic() + max(1.0, float(args.timeout))
+    current = repository
+    while str(current.get("state") or "") not in {"active", "ready"}:
+        if str(current.get("state") or "") in {"failed", "archived", "deleted"}:
+            raise SystemExit("Agent source Repository did not become active")
+        if time.monotonic() >= deadline:
+            raise SystemExit("Timed out waiting for Agent source Repository projection")
+        time.sleep(min(2.0, max(0.1, deadline - time.monotonic())))
+        rid = urllib.parse.quote(repository_id, safe="")
+        current = authenticated(args, f"/v1/forge/repositories/{rid}")
+    return current
+
+
 def cmd_agent_source_prepare(args):
     """Resolve/create the owned Repository and safely prepare an update workspace."""
     workspace = pathlib.Path(args.workspace).expanduser().resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    repository = _repository_for_source(args)
+    repository = _wait_repository_active(args, _repository_for_source(args))
     repository_id = str(repository.get("repository_id") or "")
     if not repository_id:
         raise SystemExit("Core Repository response has no immutable Repository ID")
