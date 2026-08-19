@@ -521,6 +521,52 @@ def cmd_agent_source_prepare(args):
                       "default_branch": default_branch}, ensure_ascii=False, indent=2))
 
 
+def cmd_agent_source_push(args):
+    """Commit only explicit Agent paths and push one exact Commit without storing credentials."""
+    workspace = pathlib.Path(args.workspace).expanduser().resolve()
+    if not (workspace / ".git").exists():
+        raise SystemExit("Agent source workspace is not a Git repository")
+    metadata = _read_source_metadata(workspace)
+    if (str(metadata.get("agent_id") or "") != args.agent_id or
+            str(metadata.get("repository_id") or "") != args.repository_id):
+        raise SystemExit("Local Agent/Repository binding does not match the push request")
+    if _git(workspace, "diff", "--cached", "--name-only"):
+        raise SystemExit("Workspace already has staged changes; commit or unstage them first")
+    selected: list[str] = []
+    for raw_path in args.path:
+        candidate = (workspace / raw_path).resolve()
+        try:
+            relative = candidate.relative_to(workspace).as_posix()
+        except ValueError as exc:
+            raise SystemExit("Agent source path escapes the workspace") from exc
+        if relative in {"", ".", ".git"} or relative.startswith(".git/"):
+            raise SystemExit("Agent source path cannot include Git control data")
+        selected.append(relative)
+    _git(workspace, "add", "--", *selected)
+    staged = _git(workspace, "diff", "--cached", "--name-only")
+    if staged:
+        _git(workspace, "commit", "-m", args.message)
+    commit_sha = _git(workspace, "rev-parse", "HEAD")
+    if not is_full_commit_sha(commit_sha):
+        raise SystemExit("Git did not produce a full immutable Commit SHA")
+    branch = args.branch or str(metadata.get("default_branch") or "main")
+    branch_check = subprocess.run(["git", "check-ref-format", "--branch", branch],
+                                  text=True, capture_output=True, encoding="utf-8",
+                                  errors="replace")
+    if branch_check.returncode != 0:
+        raise SystemExit("Agent source branch name is invalid")
+    credential = issue_git_credential(args, args.repository_id, "write")
+    run_git_with_credential(
+        ["git", "push", str(credential["clone_url"]),
+         f"{commit_sha}:refs/heads/{branch}"],
+        credential, cwd=workspace, timeout=args.timeout)
+    record_flight("agent_source_pushed", agent_id=args.agent_id,
+                  repository_id=args.repository_id, commit_sha=commit_sha, branch=branch)
+    print(json.dumps({"agent_id": args.agent_id, "repository_id": args.repository_id,
+                      "commit_sha": commit_sha, "branch": branch, "pushed": True},
+                     ensure_ascii=False, indent=2))
+
+
 def cmd_repository(args):
     """Read a tenant-scoped repository summary through Core's Forge contract."""
     rid = urllib.parse.quote(args.repository_id, safe="")
@@ -1422,6 +1468,18 @@ def main():
     source_prepare.add_argument("--credential-max-uses", type=credential_max_uses,
                                 default=20)
     source_prepare.add_argument("--timeout", type=float, default=900)
+    source_push = sub.add_parser("agent-source-push")
+    source_push.add_argument("workspace")
+    source_push.add_argument("--agent-id", required=True)
+    source_push.add_argument("--repository-id", required=True)
+    source_push.add_argument("--path", action="append", required=True,
+                             help="workspace-relative Agent path; repeat as needed")
+    source_push.add_argument("--message", required=True)
+    source_push.add_argument("--branch", default="")
+    source_push.add_argument("--credential-ttl", type=credential_ttl, default=900)
+    source_push.add_argument("--credential-max-uses", type=credential_max_uses,
+                             default=20)
+    source_push.add_argument("--timeout", type=float, default=900)
     for command in ("git-clone", "git-push"):
         git_command = sub.add_parser(command)
         git_command.add_argument("repository_id")
@@ -1589,6 +1647,8 @@ def main():
         cmd_repository(args)
     elif args.command == "agent-source-prepare":
         cmd_agent_source_prepare(args)
+    elif args.command == "agent-source-push":
+        cmd_agent_source_push(args)
     elif args.command == "git-clone":
         cmd_git_clone(args)
     elif args.command == "git-push":

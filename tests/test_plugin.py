@@ -315,6 +315,27 @@ class PluginTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 api._read_source_metadata(workspace)
 
+    def test_agent_source_push_refuses_preexisting_staged_changes(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as td:
+            workspace = pathlib.Path(td)
+            subprocess.run(["git", "-C", str(workspace), "init"], check=True,
+                           capture_output=True, text=True)
+            api._write_source_metadata(workspace, agent_id="agt_1",
+                                       repository_id="repo_1", default_branch="main")
+            source = workspace / "agent.md"
+            source.write_text("agent", encoding="utf-8")
+            subprocess.run(["git", "-C", str(workspace), "add", "agent.md"], check=True)
+            args = SimpleNamespace(workspace=str(workspace), agent_id="agt_1",
+                                   repository_id="repo_1", path=["agent.md"],
+                                   message="feat: update agent", branch="main",
+                                   credential_ttl=900, credential_max_uses=20, timeout=30)
+            with mock.patch.object(api, "issue_git_credential") as issue, \
+                 self.assertRaises(SystemExit) as raised:
+                api.cmd_agent_source_push(args)
+            issue.assert_not_called()
+            self.assertIn("already has staged changes", str(raised.exception))
+
     def test_git_credential_limits_fail_before_network_exchange(self):
         api = load_api()
         with mock.patch.object(api, "authenticated") as request:
@@ -568,7 +589,7 @@ class PluginTests(unittest.TestCase):
         self.assertIn("source-build-status", result.stdout)
         self.assertIn("source-eval-status", result.stdout)
         for command in ("repositories", "repository-create", "repository-status",
-                        "agent-source-prepare", "git-clone", "git-push"):
+                        "agent-source-prepare", "agent-source-push", "git-clone", "git-push"):
             self.assertIn(command, result.stdout)
         for command in ("release-submit-review", "release-approve", "release-activate",
                         "release-withdraw", "release-rollback"):

@@ -154,7 +154,7 @@ old claims blindly.
 
 Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
 developer routes implemented by `agentour_api.py`: `repositories`, `repository-create`,
-`repository-status`, `repository`, `agent-source-prepare`, `git-clone`, `git-push`, `source-revision`,
+`repository-status`, `repository`, `agent-source-prepare`, `agent-source-push`, `git-clone`, `git-push`, `source-revision`,
 `source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
 `source-eval-status`, `release`, `release-status`, `release-submit-review`, `release-approve`,
 `release-activate`, `release-withdraw`, and `release-rollback`. These create and transition
@@ -189,6 +189,10 @@ Never infer a Repository from the directory name. A dirty local workspace is pre
 the explicit `--use-local` choice; it must never be reset. Fast-forward a clean workspace only when
 the fetched Commit proves ancestry. If local and remote diverge, stop for merge, rebase, or a new
 branch. A locally-ahead Commit remains local authority and must not be discarded.
+After Package validation, use `agent-source-push` with only explicit workspace-relative Package paths.
+It refuses pre-existing staged changes, commits only those paths, and pushes the exact resulting Commit
+through a fresh short-lived Core credential. Never stage the entire workspace implicitly. Core—not the
+Plugin—creates immutable release Tags and Forge Releases after all source and Drive gates pass.
 
 ### 5B. Existing Agent inventory
 
