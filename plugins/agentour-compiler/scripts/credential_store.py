@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Cross-platform developer-token storage for Agentour Compiler Plugins."""
+"""Cross-platform OAuth credential storage for Agentour Compiler Plugins."""
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
 from pathlib import Path
@@ -22,7 +21,7 @@ def _check(platform: str) -> str:
 
 
 def _env_name(platform: str) -> str:
-    return f"AGENTOUR_TOKEN_{platform.upper()}"
+    return f"AGENTOUR_OAUTH_BUNDLE_{platform.upper()}"
 
 
 def _is_wsl() -> bool:
@@ -96,7 +95,7 @@ def backend_name() -> str:
     return "restricted-file"
 
 
-def get_token(platform: str) -> str:
+def _get_secret(platform: str) -> str:
     platform = _check(platform)
     from_env = os.environ.get(_env_name(platform), "").strip()
     if from_env:
@@ -121,42 +120,58 @@ def get_token(platform: str) -> str:
     return str(_fallback_load().get(platform, "")).strip()
 
 
-def set_token(platform: str, token: str) -> str:
+def _set_secret(platform: str, value: str) -> str:
     platform = _check(platform)
-    token = token.strip()
-    if not token.startswith(("ak_", "at_", "ts_")):
-        raise ValueError("account token must start with ak_, at_, or tenant ts_")
+    value = value.strip()
+    if not value:
+        raise ValueError("OAuth credential bundle must not be empty")
     backend = backend_name()
     account = f"{platform}:default"
     if backend == "environment":
         raise RuntimeError(f"set {_env_name(platform)} in this non-interactive environment")
     if backend == "windows-credential-manager":
         script = f"$v=New-Object Windows.Security.Credentials.PasswordVault; try{{$old=$v.Retrieve('{SERVICE}','{account}');$v.Remove($old)}}catch{{}};$v.Add((New-Object Windows.Security.Credentials.PasswordCredential('{SERVICE}','{account}',$env:AGENTOUR_CREDENTIAL_VALUE)))"
-        result = _ps(script, token=token)
+        result = _ps(script, token=value)
         if result.returncode != 0:
-            data = _fallback_load(); data[platform] = token; _fallback_write(data)
+            data = _fallback_load(); data[platform] = value; _fallback_write(data)
             return "restricted-file"
     elif backend == "macos-keychain":
         subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account],
                        capture_output=True)
         result = subprocess.run(["security", "add-generic-password", "-U", "-s", SERVICE,
-                                 "-a", account, "-w", token], text=True, capture_output=True)
+                                 "-a", account, "-w", value], text=True, capture_output=True)
         if result.returncode != 0:
-            data = _fallback_load(); data[platform] = token; _fallback_write(data)
+            data = _fallback_load(); data[platform] = value; _fallback_write(data)
             return "restricted-file"
     elif backend == "linux-secret-service":
-        result = subprocess.run(["secret-tool", "store", "--label", "Agentour developer token",
-                                 "service", SERVICE, "account", account], input=token,
+        result = subprocess.run(["secret-tool", "store", "--label", "Agentour Plugin OAuth",
+                                 "service", SERVICE, "account", account], input=value,
                                 text=True, capture_output=True)
         if result.returncode != 0:
-            data = _fallback_load(); data[platform] = token; _fallback_write(data)
+            data = _fallback_load(); data[platform] = value; _fallback_write(data)
             return "restricted-file"
     else:
-        data = _fallback_load(); data[platform] = token; _fallback_write(data)
+        data = _fallback_load(); data[platform] = value; _fallback_write(data)
     return backend
 
 
-def delete_token(platform: str) -> None:
+def get_credentials(platform: str) -> dict:
+    raw=_get_secret(platform)
+    try:value=json.loads(raw)
+    except (TypeError,json.JSONDecodeError):return {}
+    if not isinstance(value,dict) or value.get("credential_type")!="oauth_public_client_v1":return {}
+    return value
+
+
+def set_credentials(platform: str, credentials: dict) -> str:
+    required={"credential_type","client_id","access_token","refresh_token","expires_at",
+              "issuer","subject","scopes"}
+    if not isinstance(credentials,dict) or not required.issubset(credentials):
+        raise ValueError("OAuth credential bundle is incomplete")
+    return _set_secret(platform,json.dumps(credentials,separators=(",",":"),sort_keys=True))
+
+
+def delete_credentials(platform: str) -> None:
     platform = _check(platform); backend = backend_name(); account = f"{platform}:default"
     if backend == "windows-credential-manager":
         _ps(f"$v=New-Object Windows.Security.Credentials.PasswordVault; try{{$c=$v.Retrieve('{SERVICE}','{account}');$v.Remove($c)}}catch{{}}")
@@ -170,7 +185,7 @@ def delete_token(platform: str) -> None:
 
 
 def storage_status(platform: str) -> dict:
-    stored = bool(get_token(platform))
+    stored = bool(get_credentials(platform))
     backend = backend_name()
     if stored and platform in _fallback_load():
         backend = "restricted-file"
@@ -179,20 +194,16 @@ def storage_status(platform: str) -> dict:
 
 
 def main() -> None:
-    if len(sys.argv) < 2 or sys.argv[1] not in {"status", "set", "delete", "clear"}:
-        raise SystemExit("usage: credential_store.py status [platform] | set <platform> | delete <platform> | clear")
+    if len(sys.argv) < 2 or sys.argv[1] not in {"status", "delete", "clear"}:
+        raise SystemExit("usage: credential_store.py status [platform] | delete <platform> | clear")
     command = sys.argv[1]
     if command == "status":
         platforms = [sys.argv[2]] if len(sys.argv) > 2 else sorted(PLATFORMS)
         print(json.dumps({p: storage_status(p) for p in platforms}, ensure_ascii=False))
-    elif command == "set":
-        platform = _check(sys.argv[2])
-        token = sys.stdin.read().strip() if not sys.stdin.isatty() else getpass.getpass("Developer token: ")
-        print(json.dumps({"stored": True, "platform": platform, "backend": set_token(platform, token)}, ensure_ascii=False))
     elif command == "delete":
-        delete_token(sys.argv[2]); print(json.dumps({"deleted": True, "platform": sys.argv[2]}))
+        delete_credentials(sys.argv[2]); print(json.dumps({"deleted": True, "platform": sys.argv[2]}))
     else:
-        for platform in PLATFORMS: delete_token(platform)
+        for platform in PLATFORMS: delete_credentials(platform)
         print(json.dumps({"cleared": True}))
 
 

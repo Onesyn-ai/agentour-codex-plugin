@@ -21,10 +21,9 @@ the Agent's purpose until the command returns `ready_for_interview: true`.
 - `restart_required`: stop and ask for a new Thread.
 - `platform_choice_required`: ask only the fixed platform choice, then rerun with
   `bootstrap --target-platform <test|production>`.
-- `token_required`: ask only for that platform's developer token. Tell the user to sign in to the
-  selected Agentour website and generate a dedicated API Token from its developer/Plugin page, then
-  store it and rerun the same command. Never ask the user to copy a browser cookie, OIDC provider
-  token, or any value from `localStorage`.
+- `authorization_required`: tell the user that the Plugin opened the selected Agentour website and
+  wait for browser authorization to complete. Never ask the user to copy a Token, browser Cookie,
+  OIDC provider token, or any value from `localStorage`.
 - `blocked`: stop and report the bootstrap error.
 - `ready_for_interview`: use the returned Contract, recommended model, and active Compiler Tasks.
 
@@ -93,29 +92,29 @@ The first unresolved question must be exactly:
 
 Record the selected name and URL.
 
-### 2. Developer token
+### 2. Browser authorization
 
-First inspect the selected platform's saved credential:
+First inspect the selected platform's saved OAuth credential:
 
 ```bash
 python3 "${CODEX_PLUGIN_ROOT}/scripts/credential_store.py" status <test|production>
 ```
 
-If a token is stored, validate it immediately without asking the user. Only ask for a token when none is stored or the platform explicitly returns 401/403. After receiving a replacement, validate it and store it through `credential_store.py set <platform>`; the credential script automatically selects Windows Credential Manager, macOS Keychain, Linux Secret Service, WSL bridging, environment variables, or a permission-restricted fallback.
+If no valid credential is stored, `bootstrap` starts a one-time `127.0.0.1` callback, creates a high-
+entropy PKCE S256 verifier/challenge plus state and nonce, and opens the selected Core authorization
+page. The user signs in through Logto and approves there. The Plugin validates issuer, audience,
+subject, scope, expiry, state and nonce before continuing. Refresh Token rotation and replay handling
+are automatic. The credential script selects Windows Credential Manager, macOS Keychain, Linux Secret
+Service, WSL bridging, or a permission-restricted fallback, separated by testing/production.
 
-The required credential is a dedicated `ak_...` API Token generated after signing in to Agentour's
-developer/Plugin page. Browser authentication remains an HttpOnly Cookie session. Never instruct the
-user to inspect browser storage or reuse a Cookie/OIDC token as `AGENTOUR_TOKEN`.
-
-Validate immediately:
+Validate or reauthorize immediately:
 
 ```bash
-AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <test|production> verify-token
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> authorize
 ```
 
-- Never print, pass as a command-line argument, persist in the project, commit, or include the token in a report.
-- If validation fails, ask one question requesting a corrected token after the user checks that platform's console.
+- Never print, pass as a command-line argument, persist in the project, commit, or include OAuth credentials in a report.
+- If validation fails, revoke the unusable local device credential and restart browser authorization.
 - Do not advance until `GET /v1/dev/me` succeeds.
 
 ### 3. Model discovery
@@ -123,10 +122,8 @@ AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" 
 After token validation, first fetch the platform contract, then models:
 
 ```bash
-AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <test|production> contract
-AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
-  --platform <test|production> models
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> contract
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> models
 ```
 
 The `models` command probes every model returned by the selected platform, removes failed models from `data`, sorts usable models by platform quality rank, and returns `recommended_model`. Unless the user explicitly names a model, requests a cost ceiling, or says to prioritize economy, always use `recommended_model`: the Plugin must never silently downgrade Agent quality to save cost. Economic tradeoffs belong to the developer. Inspect `filtered_unavailable` only for diagnostics. Use the contract's Smoke schema, Node/Eve versions, canonical model IDs, ignore rules, package limit, pricing unit, and runtime semantics. Run `model-probe <model>` once more immediately before generation and never use a model that fails.
@@ -425,7 +422,7 @@ If polling is interrupted or the local command times out, resume that exact paid
 `track-build <job-id>`; never resubmit merely because observation stopped.
 
 ```bash
-AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
   --platform <test|production> publish-async packages/<agent-id> \
   --visibility <private|public>
 ```
@@ -451,10 +448,10 @@ Do not create a short/user/summary alternative. Persist evidence continuously th
 `scripts/flight_recorder.py`; do not reconstruct failures, latency, Job transitions, Package hashes,
 polling or unknown environment facts from memory after publishing.
 
-Upload it with the same validated token to the selected platform:
+Upload it with the same validated browser authorization to the selected platform:
 
 ```bash
-AGENTOUR_TOKEN="<token>" python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" \
   --platform <test|production> feedback "<readable-run-report>.md" \
   --plugin-version "<installed manifest version>" --operation <create|reconstruct|update> \
   --agent-id <agent-id> --publish-job <job-id>

@@ -557,16 +557,14 @@ class PluginTests(unittest.TestCase):
                         "release-withdraw", "release-rollback"):
             self.assertIn(command, result.stdout)
 
-    def test_token_guidance_requires_dedicated_api_token(self):
+    def test_auth_guidance_requires_browser_oauth(self):
         guidance = "\n".join([
             (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8"),
             (PLUGIN / "guides/publishing.md").read_text(encoding="utf-8"),
         ])
-        self.assertIn("dedicated `ak_...` API Token", guidance)
-        self.assertIn("HttpOnly Cookie", guidance)
-        self.assertIn("Never instruct the", guidance)
-        self.assertIn("user to inspect browser storage", guidance)
-        self.assertIn("never ask for or reuse browser cookies", guidance)
+        self.assertIn("Authorization Code + PKCE", guidance)
+        self.assertIn("operating-system credential store", guidance)
+        self.assertIn("Never ask the user to copy a Token", guidance)
 
     def test_bootstrap_requires_platform_before_interview(self):
         api = load_api()
@@ -714,7 +712,7 @@ class PluginTests(unittest.TestCase):
             reference = pathlib.Path(temp) / "expert.md"
             reference.write_text("# Expert", encoding="utf-8")
             args = SimpleNamespace(platform="test", files=[str(reference)])
-            with mock.patch.dict(os.environ, {"AGENTOUR_TOKEN": "at_test"}), \
+            with mock.patch.object(api,"access_token",return_value="oa_access"), \
                  mock.patch.object(api.urllib.request, "urlopen", return_value=response) as upload, \
                  mock.patch.object(api, "authenticated", return_value={"assets": [{"id": "kas_1"}]}) as finalize, \
                  mock.patch("builtins.print"):
@@ -765,37 +763,22 @@ class PluginTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must not author sandbox.ts", result.stdout)
 
-    def test_token_requires_account_prefix(self):
+    def test_api_request_requires_oauth_authorization(self):
         api = load_api()
-        old = os.environ.get("AGENTOUR_TOKEN")
-        os.environ["AGENTOUR_TOKEN"] = "wrong"
-        try:
+        with mock.patch.object(api,"access_token",side_effect=api.OAuthClientError(
+                "OAUTH_AUTHORIZATION_REQUIRED")):
             with self.assertRaises(SystemExit):
                 api.request("production", "/v1/dev/me", auth=True)
-        finally:
-            if old is None:
-                os.environ.pop("AGENTOUR_TOKEN", None)
-            else:
-                os.environ["AGENTOUR_TOKEN"] = old
 
-    def test_tenant_subject_token_is_supported(self):
+    def test_plugin_request_uses_oauth_access_token(self):
         api = load_api()
         response = mock.MagicMock()
         response.__enter__.return_value = response
-        response.read.return_value = b'{"developer_id":"tenant:ten_demo:subject:tsu_demo"}'
-        with mock.patch.dict(os.environ, {"AGENTOUR_TOKEN": "ts_tenant_token"}), \
+        response.read.return_value = b'{"developer_id":"user_demo"}'
+        with mock.patch.object(api,"access_token",return_value="oa_access"), \
              mock.patch.object(api.urllib.request, "urlopen", return_value=response):
             result=api.request("test","/v1/dev/me",auth=True)
-        self.assertTrue(result["developer_id"].startswith("tenant:"))
-
-    def test_unified_account_token_prefix_is_accepted(self):
-        api = load_api()
-        with mock.patch.object(api, "get_token", return_value="ak_test"), \
-             mock.patch.object(api.urllib.request, "urlopen") as urlopen:
-            response = mock.MagicMock()
-            response.__enter__.return_value.read.return_value = b'{}'
-            urlopen.return_value = response
-            self.assertEqual(api.request("test", "/v1/dev/me", auth=True), {})
+        self.assertEqual(result["developer_id"],"user_demo")
 
     def test_flight_recorder_persists_redacted_job_evidence(self):
         script = PLUGIN / "scripts/flight_recorder.py"
@@ -859,12 +842,11 @@ class PluginTests(unittest.TestCase):
             api.validate_forge_checkpoint({**checkpoint,
                                            "remote_job_id": "gcr_example.secret-value"})
 
-    def test_publishing_docs_use_unified_token_and_valid_visibility_command(self):
+    def test_publishing_docs_use_browser_oauth_and_valid_visibility_command(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         guide = (PLUGIN / "guides/publishing.md").read_text(encoding="utf-8")
-        self.assertIn("`ak_` for a dedicated platform account API token", readme)
-        self.assertIn("`ts_` for a tenant user", readme)
-        self.assertNotIn("Enter a `at_` developer token", readme)
+        self.assertIn("Authorization Code + PKCE",readme)
+        self.assertNotIn("Enter an Agentour access token",readme)
         self.assertIn("--visibility <private|public>", guide)
 
     def test_default_flight_log_is_outside_package(self):
@@ -898,13 +880,17 @@ class PluginTests(unittest.TestCase):
             os.environ["XDG_CONFIG_HOME"] = temp
             os.environ["AGENTOUR_CREDENTIAL_BACKEND"] = "restricted-file"
             try:
-                module.set_token("test", "ak_test_token_value")
-                module.set_token("production", "at_production_token_value")
-                self.assertEqual(module.get_token("test"), "ak_test_token_value")
-                self.assertEqual(module.get_token("production"), "at_production_token_value")
-                module.delete_token("test")
-                self.assertEqual(module.get_token("test"), "")
-                self.assertEqual(module.get_token("production"), "at_production_token_value")
+                bundle=lambda subject:{"credential_type":"oauth_public_client_v1",
+                    "client_id":"agentour-codex-plugin","access_token":"oa_access",
+                    "refresh_token":"or_refresh","expires_at":9999999999,
+                    "issuer":"https://identity.test","subject":subject,"scopes":["openid"]}
+                module.set_credentials("test",bundle("test-user"))
+                module.set_credentials("production",bundle("prod-user"))
+                self.assertEqual(module.get_credentials("test")["subject"],"test-user")
+                self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
+                module.delete_credentials("test")
+                self.assertEqual(module.get_credentials("test"),{})
+                self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
             finally:
                 for key, value in old.items():
                     if value is None: os.environ.pop(key, None)
@@ -919,8 +905,11 @@ class PluginTests(unittest.TestCase):
                                           "AGENTOUR_CREDENTIAL_BACKEND": "windows-credential-manager"}), \
              mock.patch.object(module, "_ps", return_value=SimpleNamespace(
                  returncode=1, stdout="", stderr="unavailable")):
-            self.assertEqual(module.set_token("production", "at_persistent_value"), "restricted-file")
-            self.assertEqual(module.get_token("production"), "at_persistent_value")
+            bundle={"credential_type":"oauth_public_client_v1","client_id":"agentour-codex-plugin",
+                "access_token":"oa_access","refresh_token":"or_refresh","expires_at":9999999999,
+                "issuer":"https://identity.test","subject":"user","scopes":["openid"]}
+            self.assertEqual(module.set_credentials("production",bundle),"restricted-file")
+            self.assertEqual(module.get_credentials("production")["subject"],"user")
             credential = pathlib.Path(temp) / "agentour/credentials.json"
             if os.name == "nt":
                 self.assertTrue(credential.is_file())

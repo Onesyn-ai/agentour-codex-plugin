@@ -28,7 +28,8 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from credential_store import delete_token, get_token
+from credential_store import delete_credentials
+from oauth_client import OAuthClientError,access_token
 from flight_recorder import read as read_flight, record as record_flight, record_job_sample
 
 PLATFORMS = {
@@ -119,11 +120,6 @@ def format_api_error(status: int, detail: str) -> str:
     return f"Agentour API {status}: {safe_text}"
 
 
-def is_account_token(token: str) -> bool:
-    """Accept platform account, legacy developer, and tenant subject tokens."""
-    return token.startswith(("ak_", "at_", "ts_"))
-
-
 def base_url(platform: str) -> str:
     return PLATFORMS[platform]["url"]
 
@@ -137,9 +133,8 @@ def request(platform: str, path: str, *, method: str = "GET",
         headers["Content-Type"] = content_type
     headers.update(extra_headers or {})
     if auth:
-        token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(platform)
-        if not is_account_token(token):
-            raise SystemExit(f"No saved developer token for {platform}; store one before continuing")
+        try:token=access_token(platform,base_url(platform))
+        except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
         headers["Authorization"] = f"Bearer {token}"
     attempts = 4 if method in {"GET", "HEAD"} else 1
     for attempt in range(attempts):
@@ -154,8 +149,7 @@ def request(platform: str, path: str, *, method: str = "GET",
             if exc.code in {502, 503, 504} and attempt + 1 < attempts:
                 time.sleep(0.5 * (2 ** attempt))
                 continue
-            if auth and exc.code in {401, 403} and not os.environ.get("AGENTOUR_TOKEN", "").strip():
-                delete_token(platform)
+            if auth and exc.code==401:delete_credentials(platform)
             raise SystemExit(format_api_error(exc.code, detail)) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt + 1 < attempts:
@@ -659,7 +653,9 @@ def sync_flight(args, task_id: str = "") -> None:
         return
 
 
-def cmd_verify_token(args):
+def cmd_authorize(args):
+    try:access_token(args.platform,base_url(args.platform),interactive=True)
+    except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
     result = authenticated(args, "/v1/dev/me")
     print(json.dumps({"valid": True, "platform": PLATFORMS[args.platform]["name"],
                       "developer_id": result.get("developer_id")}, ensure_ascii=False), flush=True)
@@ -801,18 +797,14 @@ def cmd_bootstrap(args):
             print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
             return
     args.platform = platform
-    token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(platform)
-    if not is_account_token(token):
-        result.update({"platform": platform, "token_required": True})
-        print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-        return
     try:
+        access_token(platform,base_url(platform),interactive=True)
         identity = authenticated(args, "/v1/dev/me")
         contract = authenticated(args, "/v1/dev/compiler-contract")
         models = discover_models(args)
         tasks = authenticated(args, "/v1/dev/compiler-tasks?active=true")
         fix_tasks = authenticated(args, "/v1/dev/fix-tasks?limit=200")
-    except SystemExit as exc:
+    except (SystemExit,OAuthClientError) as exc:
         result.update({"platform": platform, "blocked": True, "error": str(exc)})
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         raise
@@ -1149,9 +1141,8 @@ def cmd_checkpoint_package(args):
 def cmd_restore_checkpoint(args):
     task_id = urllib.parse.quote(args.task_id, safe="")
     headers = {"Accept": "application/gzip"}
-    token = os.environ.get("AGENTOUR_TOKEN", "").strip() or get_token(args.platform)
-    if not is_account_token(token):
-        raise SystemExit(f"No saved developer token for {args.platform}")
+    try:token=access_token(args.platform,base_url(args.platform))
+    except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
     headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(base_url(args.platform) +
                                  f"/v1/dev/compiler-tasks/{task_id}/package", headers=headers)
@@ -1178,8 +1169,8 @@ def cmd_restore_checkpoint(args):
 
 
 def cmd_upload_references(args):
-    token=os.environ.get("AGENTOUR_TOKEN","").strip() or get_token(args.platform)
-    if not is_account_token(token):raise SystemExit("No saved developer token")
+    try:token=access_token(args.platform,base_url(args.platform))
+    except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
     uploaded=[]
     for raw in args.files:
         path=pathlib.Path(raw).expanduser().resolve()
@@ -1286,7 +1277,7 @@ def main():
     sub.add_parser("platforms")
     bootstrap = sub.add_parser("bootstrap")
     bootstrap.add_argument("--target-platform", choices=PLATFORMS)
-    sub.add_parser("verify-token")
+    sub.add_parser("authorize")
     sub.add_parser("models")
     repositories = sub.add_parser("repositories")
     repositories.add_argument("--cursor", default="")
@@ -1455,8 +1446,8 @@ def main():
         print(json.dumps(PLATFORMS, ensure_ascii=False, indent=2))
     elif args.command == "bootstrap":
         cmd_bootstrap(args)
-    elif args.command == "verify-token":
-        cmd_verify_token(args)
+    elif args.command == "authorize":
+        cmd_authorize(args)
     elif args.command == "models":
         cmd_models(args)
     elif args.command == "repositories":

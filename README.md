@@ -22,14 +22,14 @@ Use natural language; do not choose internal Skills:
 The Plugin enforces this sequence:
 
 1. Choose **测试服** (`https://test.agentour.ai`) or **正式服** (`https://agentour.ai`).
-2. Enter an Agentour access token (`ak_` for a dedicated platform account API token, legacy `at_`, or `ts_` for a tenant user); the Plugin validates it with `GET /v1/dev/me` and asks again if invalid.
+2. The Plugin opens the selected Agentour site for browser sign-in and authorization. It uses Authorization Code + PKCE, stores the rotating credential in the operating-system credential store, and refreshes it automatically.
 3. Fetch models from that platform's `GET /v1/models`, probe every model, and remove unavailable models before selection.
 4. Choose whether to reconstruct an existing Agent or invent a new one.
 5. Complete a one-question-per-turn brainstorm and grill-me interview.
 6. Generate Package(s), validate, repair, and verify fidelity.
 7. Choose private or public upload, run the remote Build Gate, then publish only after it succeeds.
 
-The token is never written to files or reports.
+OAuth credentials are never written to Agent Packages, project files, checkpoints, logs, or reports.
 
 `remote-build` reports structured Gates and reuses cached Package hashes without consuming a
 new E2B quota. HTTP `429` means the active or daily quota is exhausted and must not be bypassed

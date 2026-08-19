@@ -1,9 +1,10 @@
 # Publishing
 
-Require explicit `AGENTOUR_URL`; discover models through `${AGENTOUR_URL}/v1/models`. Require
-`AGENTOUR_TOKEN` only when publishing. `AGENTOUR_TOKEN` must be a dedicated `ak_...` API Token generated
-from the selected Agentour site's developer/Plugin page after browser sign-in. Browser login uses an
-HttpOnly Cookie; never ask for or reuse browser cookies, OIDC provider tokens, or `localStorage` values.
+Use the fixed selected platform URL and discover models through its public API. The Plugin must complete
+browser Authorization Code + PKCE before any authenticated operation. Access tokens are refreshed
+automatically; rotating refresh credentials live only in the operating-system credential store (or the
+permission-restricted platform fallback). Never ask for a copied Token, browser Cookie, OIDC provider
+token, or `localStorage` value.
 
 Prefer asynchronous publication:
 
