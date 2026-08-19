@@ -671,21 +671,6 @@ def cmd_source_eval_status(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-def cmd_release(args):
-    body = {"package_id": args.package_id, "version": args.version,
-            "source_revision_id": args.source_revision_id,
-            "visibility": args.visibility, "tag": args.tag or None}
-    key = stable_idempotency_key("release", args.package_id, args.version,
-                                 args.source_revision_id)
-    result = authenticated(args, "/v1/dev/releases", method="POST", body=body,
-                           idempotency_key=key)
-    record_flight("release_record_submitted", package_id=args.package_id,
-                  source_revision_id=args.source_revision_id,
-                  release_id=result.get("release_id"),
-                  contract_version=FORGE_CONTRACT_VERSION)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
 def cmd_agent_release(args):
     """Run the one authoritative Core/Forge/Drive Agent release transaction."""
     operation = stable_idempotency_key(
@@ -736,34 +721,6 @@ def cmd_agent_release(args):
         release_id=result.get("id"),
         status=result.get("state"),
         contract_version=FORGE_CONTRACT_VERSION,
-    )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-def cmd_release_status(args):
-    release_id = urllib.parse.quote(args.release_id, safe="")
-    result = authenticated(args, f"/v1/dev/releases/{release_id}")
-    record_flight("release_record_read", release_id=args.release_id,
-                  status=result.get("status"), contract_version=FORGE_CONTRACT_VERSION)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-
-
-def cmd_release_action(args, action: str):
-    """Apply one frozen Release state transition with deterministic replay."""
-    if action not in {"submit-review", "approve", "activate", "withdraw", "rollback"}:
-        raise ValueError("unsupported release action")
-    release_id = urllib.parse.quote(args.release_id, safe="")
-    target_release_id = (getattr(args, "target_release_id", "") if action == "rollback" else "")
-    body = ({"target_release_id": target_release_id} if target_release_id else {})
-    key = stable_idempotency_key(f"release-{action}", args.release_id, target_release_id)
-    result = authenticated(
-        args, f"/v1/dev/releases/{release_id}/{action}", method="POST", body=body,
-        idempotency_key=key,
-    )
-    record_flight(
-        "release_transition_applied", release_id=args.release_id, action=action,
-        status=result.get("status"), contract_version=result.get(
-            "contract_version", FORGE_CONTRACT_VERSION),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -1625,11 +1582,6 @@ def main():
     source_eval_status = sub.add_parser(
         "source-eval-status", help="read an existing Source Revision Eval")
     source_eval_status.add_argument("eval_run_id")
-    release = sub.add_parser("release")
-    for name in ("package-id", "version", "source-revision-id"):
-        release.add_argument("--" + name, required=True)
-    release.add_argument("--visibility", choices=("private", "public"), default="private")
-    release.add_argument("--tag", default="")
     agent_release = sub.add_parser(
         "agent-release", help="publish through the unified Core/Forge/Drive transaction")
     agent_release.add_argument("--agent-id", required=True)
@@ -1641,18 +1593,6 @@ def main():
     agent_release.add_argument("--required-approvals", type=lambda value: bounded_int(
         value, minimum=0, maximum=100, option="--required-approvals"), default=0)
     agent_release.add_argument("--release-notes", default="")
-    release_status = sub.add_parser("release-status")
-    release_status.add_argument("release_id")
-    for command, help_text in (
-            ("release-submit-review", "submit a Release for review"),
-            ("release-approve", "approve a reviewed Release"),
-            ("release-activate", "activate an approved Release"),
-            ("release-withdraw", "withdraw a Release"),
-            ("release-rollback", "roll back an active Release")):
-        transition = sub.add_parser(command, help=help_text)
-        transition.add_argument("release_id")
-        if command == "release-rollback":
-            transition.add_argument("--target-release-id", default="")
     save_forge_checkpoint = sub.add_parser("save-forge-checkpoint")
     save_forge_checkpoint.add_argument("--path", default=".agentour/forge-checkpoint.json")
     save_forge_checkpoint.add_argument("--repository-id", required=True)
@@ -1791,14 +1731,8 @@ def main():
         cmd_source_eval(args)
     elif args.command == "source-eval-status":
         cmd_source_eval_status(args)
-    elif args.command == "release":
-        cmd_release(args)
     elif args.command == "agent-release":
         cmd_agent_release(args)
-    elif args.command == "release-status":
-        cmd_release_status(args)
-    elif args.command.startswith("release-") and args.command != "release-status":
-        cmd_release_action(args, args.command.removeprefix("release-"))
     elif args.command == "save-forge-checkpoint":
         cmd_save_forge_checkpoint(args)
     elif args.command == "restore-forge-checkpoint":

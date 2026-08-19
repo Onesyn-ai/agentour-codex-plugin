@@ -455,8 +455,6 @@ class PluginTests(unittest.TestCase):
         source_args = SimpleNamespace(platform="test", repository_id="repo_1", commit_sha=commit,
                                       pull_request_number=42)
         build_args = SimpleNamespace(platform="test", source_revision_id="sr_1")
-        release_args = SimpleNamespace(platform="test", package_id="pkg_1", version="1.2.3",
-                                       source_revision_id="sr_1", visibility="private", tag="")
         with mock.patch.object(api, "authenticated", return_value={"source_revision_id": "sr_1"}) as request, \
              mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
             api.cmd_source_revision(source_args)
@@ -475,27 +473,21 @@ class PluginTests(unittest.TestCase):
         self.assertNotEqual(first.kwargs["idempotency_key"], changed_request.call_args.kwargs["idempotency_key"])
 
         with mock.patch.object(api, "authenticated", side_effect=[
-                {"build_id": "bld_1"}, {"eval_run_id": "evr_1"}, {"release_id": "rel_1"}]) as request, \
+                {"build_id": "bld_1"}, {"eval_run_id": "evr_1"}]) as request, \
              mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
             api.cmd_source_build(build_args)
             api.cmd_source_eval(build_args)
-            api.cmd_release(release_args)
-        build_call, eval_call, release_call = request.call_args_list
+        build_call, eval_call = request.call_args_list
         self.assertEqual(build_call.args[1], "/v1/dev/source-revisions/sr_1/builds")
         self.assertEqual(eval_call.args[1], "/v1/dev/source-revisions/sr_1/eval-runs")
         self.assertTrue(build_call.kwargs["idempotency_key"].startswith("agentour-source-build-"))
         self.assertTrue(eval_call.kwargs["idempotency_key"].startswith("agentour-source-eval-"))
-        self.assertEqual(release_call.kwargs["body"], {
-            "package_id": "pkg_1", "version": "1.2.3", "source_revision_id": "sr_1",
-            "visibility": "private", "tag": None,
-        })
-        self.assertTrue(release_call.kwargs["idempotency_key"].startswith("agentour-release-"))
 
     def test_authenticated_places_idempotency_key_in_http_header(self):
         api = load_api()
         args = SimpleNamespace(platform="test")
         with mock.patch.object(api, "request", return_value={}) as request:
-            api.authenticated(args, "/v1/dev/releases", method="POST", body={"x": 1},
+            api.authenticated(args, "/v1/plugin/agents/agt_1/releases", method="POST", body={"x": 1},
                               idempotency_key="agentour-release-example")
         self.assertEqual(request.call_args.kwargs["extra_headers"], {
             "Idempotency-Key": "agentour-release-example"
@@ -506,18 +498,14 @@ class PluginTests(unittest.TestCase):
         args = SimpleNamespace(platform="production", source_revision_id="sr_1")
         build_args = SimpleNamespace(platform="production", build_id="bld/1")
         eval_args = SimpleNamespace(platform="production", eval_run_id="evr/1")
-        release_args = SimpleNamespace(platform="production", release_id="rel_1")
-        with mock.patch.object(api, "authenticated", side_effect=[{}, {}, {}, {}]) as request, \
+        with mock.patch.object(api, "authenticated", side_effect=[{}, {}, {}]) as request, \
              mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
             api.cmd_source_revision_status(args)
             api.cmd_source_build_status(build_args)
             api.cmd_source_eval_status(eval_args)
-            api.cmd_release_status(release_args)
         self.assertEqual(request.call_args_list[0].args[1], "/v1/dev/source-revisions/sr_1")
         self.assertEqual(request.call_args_list[1].args[1], "/v1/dev/builds/bld%2F1")
         self.assertEqual(request.call_args_list[2].args[1], "/v1/dev/eval-runs/evr%2F1")
-        self.assertEqual(request.call_args_list[3].args[1], "/v1/dev/releases/rel_1")
-
     def test_forge_status_commands_record_redacted_lineage_only(self):
         api = load_api()
         build_args = SimpleNamespace(platform="test", build_id="bld_1")
@@ -541,41 +529,6 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("token", build_event.kwargs)
         self.assertNotIn("token", eval_event.kwargs)
 
-    def test_release_transitions_use_frozen_routes_and_stable_idempotency(self):
-        api = load_api()
-        args = SimpleNamespace(platform="test", release_id="rel/1")
-        actions = ("submit-review", "approve", "activate", "withdraw", "rollback")
-        with mock.patch.object(api, "authenticated", return_value={
-                "release_id": "rel/1", "status": "pending_review",
-                "contract_version": "1.0"}) as request, \
-             mock.patch.object(api, "record_flight") as record, \
-             mock.patch("builtins.print"):
-            for action in actions:
-                api.cmd_release_action(args, action)
-        self.assertEqual(len(request.call_args_list), len(actions))
-        for action, call in zip(actions, request.call_args_list):
-            self.assertEqual(call.args[1], f"/v1/dev/releases/rel%2F1/{action}")
-            self.assertEqual(call.kwargs["method"], "POST")
-            self.assertEqual(call.kwargs["body"], {})
-            self.assertTrue(call.kwargs["idempotency_key"].startswith(
-                f"agentour-release-{action}-"))
-        self.assertEqual(record.call_args_list[-1].kwargs["action"], "rollback")
-
-    def test_release_rollback_can_bind_an_explicit_immutable_target(self):
-        api = load_api()
-        args = SimpleNamespace(platform="test", release_id="rel_current",
-                               target_release_id="rel_previous")
-        with mock.patch.object(api, "authenticated", return_value={
-                "release_id": "rel_previous", "status": "published",
-                "contract_version": "1.0"}) as request, \
-             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
-            api.cmd_release_action(args, "rollback")
-        self.assertEqual(request.call_args.kwargs["body"], {
-            "target_release_id": "rel_previous"
-        })
-        self.assertTrue(request.call_args.kwargs["idempotency_key"].startswith(
-            "agentour-release-rollback-"))
-
     def test_forge_status_commands_are_documented_and_visible_in_help(self):
         guide = (PLUGIN / "guides/forge-workflow.md").read_text(encoding="utf-8")
         skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
@@ -592,9 +545,8 @@ class PluginTests(unittest.TestCase):
         for command in ("repositories", "repository-create", "repository-status",
                         "agent-source-prepare", "agent-source-push", "git-clone", "git-push"):
             self.assertIn(command, result.stdout)
-        for command in ("release-submit-review", "release-approve", "release-activate",
-                        "release-withdraw", "release-rollback"):
-            self.assertIn(command, result.stdout)
+        self.assertIn("agent-release", result.stdout)
+        self.assertNotIn("release-submit-review", result.stdout)
 
     def test_auth_guidance_requires_browser_oauth(self):
         guidance = "\n".join([

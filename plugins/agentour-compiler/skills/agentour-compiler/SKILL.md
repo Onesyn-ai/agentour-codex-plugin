@@ -156,10 +156,8 @@ Read `guides/forge-workflow.md` before using managed Repository source. Use only
 developer routes implemented by `agentour_api.py`: `repositories`, `repository-create`,
 `repository-status`, `repository`, `agent-source-prepare`, `agent-source-push`, `git-clone`, `git-push`, `source-revision`,
 `source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
-`source-eval-status`, `release`, `release-status`, `release-submit-review`, `release-approve`,
-`release-activate`, `release-withdraw`, and `release-rollback`. These create and transition
-commands send deterministic idempotency keys, and Release sends only its public identity; Core derives
-and validates all Commit/tree/Build/Eval/Artifact lineage.
+`source-eval-status`, and `agent-release`. These commands send deterministic idempotency keys; Core
+derives and validates all Commit/tree/Build/Eval/Review/Drive Snapshot/Tag/Release lineage.
 
 Repository creation uses `/v1/forge/repositories`. `git-clone` and `git-push` obtain a one-time
 short-lived credential from `/v1/forge/git-credentials` and pass it to Git only through a temporary

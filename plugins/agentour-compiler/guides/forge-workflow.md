@@ -35,28 +35,17 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-eval-status <eval-run-id>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release --package-id <package-id> --version <semver> \
-  --source-revision-id <source-revision-id> --visibility <private|public>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release-status <release-id>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release-submit-review <release-id>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release-approve <release-id>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release-activate <release-id>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release-withdraw <release-id>
-python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  release-rollback <release-id> [--target-release-id <deprecated-release-id>]
+  agent-release --agent-id <agent-id> --version <semver> --source-ref <source-ref> \
+  --source-revision-id <source-revision-id> --source-commit-sha <full-commit-sha> \
+  --pull-request-number <number> --required-approvals <count> --release-notes <text>
 ```
 
 Source Revision creation always sends both the exact merged Commit and its positive pull request number;
 the Plugin never creates a review-free Source Revision from a branch head or standalone Commit. Every
 create command derives a stable `Idempotency-Key` from its immutable identifiers. Status commands
-read the existing Build/Eval resource and never submit replacement work. Release sends
-only `package_id`, `version`, `source_revision_id`, visibility, and an optional tag. Core remains the
-authority for Commit/tree/source, Build, Eval, Artifact, and gate lineage.
+read the existing Build/Eval resource and never submit replacement work. `agent-release` is the only
+publication command: Core remains the authority for Commit/tree/source, Review, Drive Snapshot,
+immutable Tag, Forge Release, Agent Version, and all gate lineage.
 
 The Git wrappers are the sole exception to deterministic replay: Core deliberately never replays a
 plaintext Git credential. Each wrapper invocation uses one fresh Idempotency-Key, keeps the credential
@@ -74,11 +63,9 @@ locally-ahead, and diverged workspaces are preserved and require an explicit saf
 so unrelated workspace files are not silently included. It pushes an exact Commit through a fresh
 short-lived credential. The Plugin never creates the platform release Tag or Forge Release directly.
 
-Release transitions also use deterministic `Idempotency-Key` values. The server derives the actor,
-approval policy and current authorization. Rollback may optionally name one immutable deprecated
-`target_release_id`; otherwise Core selects the newest valid candidate. The Plugin never supplies an
-approver, active version, Drive object reference, or Registry override. Read `release-status` after an
-interrupted transition instead of assuming the side effect failed or submitting a different Release.
+Unified release uses a deterministic `Idempotency-Key` derived from immutable inputs. Retry the same
+command after interruption; Core serializes that operation and returns the retained completed or failed
+evidence. The Plugin never creates or transitions a legacy Release record directly.
 
 Persist interruption state with:
 
