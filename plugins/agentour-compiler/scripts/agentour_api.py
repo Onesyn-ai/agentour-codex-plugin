@@ -1397,69 +1397,6 @@ def cmd_complete_fix(args):
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-def cmd_claim_aio_design(args):
-    result=authenticated(args,f"/v1/aio-design-tasks/{urllib.parse.quote(args.task_id,safe='')}/claim",
-        method="POST",body={"claim_token":args.claim_token})
-    print(json.dumps(result,ensure_ascii=False,indent=2))
-
-
-def cmd_get_aio_design_package(args):
-    result=authenticated(args,f"/v1/aio-design-tasks/{urllib.parse.quote(args.task_id,safe='')}/package")
-    output=pathlib.Path(args.output).expanduser().resolve();output.parent.mkdir(parents=True,exist_ok=True)
-    output.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf-8")
-    print(json.dumps({"task_id":args.task_id,"output":str(output),"proposal_revision":result.get("proposal_revision")},
-                     ensure_ascii=False,indent=2))
-
-
-def cmd_report_aio_design(args):
-    body={"type":args.type,"stage":args.stage,"message":args.message,"progress":args.progress,
-          "candidate_id":args.candidate_id,"data":load_json_argument(args.data,args.data_file)}
-    result=authenticated(args,f"/v1/aio-design-tasks/{urllib.parse.quote(args.task_id,safe='')}/events",
-        method="POST",body=body)
-    print(json.dumps(result,ensure_ascii=False,indent=2))
-
-
-def cmd_submit_aio_design(args):
-    result_path=pathlib.Path(args.result).expanduser().resolve()
-    payload=json.loads(result_path.read_text(encoding="utf-8"))
-    if not isinstance(payload,dict) or not isinstance(payload.get("candidates"),list):
-        raise SystemExit("AIO design result must contain candidates[]")
-    result=authenticated(args,f"/v1/aio-design-tasks/{urllib.parse.quote(args.task_id,safe='')}/result",
-        method="POST",body=payload)
-    print(json.dumps(result,ensure_ascii=False,indent=2))
-
-
-def cmd_pull_aio_workspace(args):
-    result=authenticated(args,f"/v1/aio-design-tasks/{urllib.parse.quote(args.task_id,safe='')}/workspace")
-    root=pathlib.Path(args.destination).expanduser().resolve();root.mkdir(parents=True,exist_ok=True)
-    for item in result.get("files") or []:
-        target=(root/item["path"]).resolve()
-        if root not in target.parents:raise SystemExit("Unsafe workspace path")
-        target.parent.mkdir(parents=True,exist_ok=True);target.write_text(item["content"],encoding="utf-8")
-    (root/".agentour").mkdir(exist_ok=True)
-    (root/".agentour/remote-workspace.json").write_text(json.dumps({"task_id":args.task_id,
-        "revision":result["revision"]},ensure_ascii=False,indent=2),encoding="utf-8")
-    print(json.dumps({"task_id":args.task_id,"revision":result["revision"],"destination":str(root)},ensure_ascii=False,indent=2))
-
-
-def cmd_sync_aio_workspace(args):
-    root=pathlib.Path(args.workspace).expanduser().resolve()
-    state=json.loads((root/".agentour/remote-workspace.json").read_text(encoding="utf-8"))
-    files={}
-    for path in root.rglob("*"):
-        if not path.is_file():continue
-        rel=path.relative_to(root).as_posix()
-        if rel==".agentour/remote-workspace.json" or rel.startswith((".git/","node_modules/")):continue
-        files[rel]=path.read_text(encoding="utf-8")
-    body={"expected_revision":state["revision"],"files":files,"delete_paths":[],
-          "event_type":args.type,"stage":args.stage,"message":args.message,"progress":args.progress}
-    result=authenticated(args,f"/v1/aio-design-tasks/{urllib.parse.quote(args.task_id,safe='')}/workspace",
-                         method="PATCH",body=body)
-    state["revision"]=result["revision"]
-    (root/".agentour/remote-workspace.json").write_text(json.dumps(state,ensure_ascii=False,indent=2),encoding="utf-8")
-    print(json.dumps({"task_id":args.task_id,"revision":result["revision"],"files":len(files)},ensure_ascii=False,indent=2))
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", choices=PLATFORMS, default="production")
@@ -1628,23 +1565,6 @@ def main():
     complete_fix = sub.add_parser("complete-fix")
     complete_fix.add_argument("task_id")
     complete_fix.add_argument("--result", required=True)
-    claim_aio=sub.add_parser("claim-aio-design")
-    claim_aio.add_argument("task_id");claim_aio.add_argument("claim_token")
-    get_aio=sub.add_parser("get-aio-design-package")
-    get_aio.add_argument("task_id");get_aio.add_argument("--output",required=True)
-    report_aio=sub.add_parser("report-aio-design")
-    report_aio.add_argument("task_id");report_aio.add_argument("--type",required=True)
-    report_aio.add_argument("--stage",default="");report_aio.add_argument("--message",default="")
-    report_aio.add_argument("--progress",type=int,default=0);report_aio.add_argument("--candidate-id",default="")
-    report_aio.add_argument("--data",default="{}");report_aio.add_argument("--data-file",default="")
-    submit_aio=sub.add_parser("submit-aio-design")
-    pull_aio=sub.add_parser("pull-aio-workspace")
-    pull_aio.add_argument("task_id");pull_aio.add_argument("destination")
-    sync_aio=sub.add_parser("sync-aio-workspace")
-    sync_aio.add_argument("task_id");sync_aio.add_argument("workspace")
-    sync_aio.add_argument("--type",default="workspace_updated");sync_aio.add_argument("--stage",default="designing")
-    sync_aio.add_argument("--message",default="AIO 工作区已同步");sync_aio.add_argument("--progress",type=int,default=0)
-    submit_aio.add_argument("task_id");submit_aio.add_argument("--result",required=True)
     args = parser.parse_args()
     if args.command == "platforms":
         print(json.dumps(PLATFORMS, ensure_ascii=False, indent=2))
@@ -1749,18 +1669,6 @@ def main():
             method="POST", body={"lease_seconds": args.lease_seconds}), ensure_ascii=False, indent=2))
     elif args.command == "complete-fix":
         cmd_complete_fix(args)
-    elif args.command == "claim-aio-design":
-        cmd_claim_aio_design(args)
-    elif args.command == "get-aio-design-package":
-        cmd_get_aio_design_package(args)
-    elif args.command == "report-aio-design":
-        cmd_report_aio_design(args)
-    elif args.command == "submit-aio-design":
-        cmd_submit_aio_design(args)
-    elif args.command == "pull-aio-workspace":
-        cmd_pull_aio_workspace(args)
-    elif args.command == "sync-aio-workspace":
-        cmd_sync_aio_workspace(args)
 
 
 if __name__ == "__main__":
