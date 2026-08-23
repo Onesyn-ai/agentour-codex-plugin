@@ -280,6 +280,144 @@ class PluginTests(unittest.TestCase):
             api.cmd_repository(args)
         request.assert_called_once_with(args, "/v1/dev/repositories/repo_1")
 
+    def test_pull_request_commands_use_frozen_public_contracts(self):
+        api = load_api()
+        commit = "a" * 40
+        create_args = SimpleNamespace(
+            platform="test", repository_id="repo/1", head_ref="agent/demo-0.1.0",
+            expected_head_commit_sha=commit.upper(), title="Publish demo 0.1.0",
+            body="Validated Agent source",
+        )
+        status_args = SimpleNamespace(
+            platform="test", repository_id="repo/1", pull_request_number=7,
+        )
+        merge_args = SimpleNamespace(
+            platform="test", repository_id="repo/1", pull_request_number=7,
+            expected_head_commit_sha=commit.upper(), required_approvals=0,
+        )
+        create_response = {
+            "repository_id": "repo/1", "pull_request_number": 7, "status": "open",
+            "head": {"commit_sha": commit}, "contract_version": "1.0",
+        }
+        status_response = {
+            **create_response, "reviews": [], "reviews_total": 0,
+        }
+        merge_response = {
+            "repository_id": "repo/1", "pull_request_number": 7, "status": "merged",
+            "merged": True, "head": {"commit_sha": commit},
+            "merge_commit_sha": "b" * 40, "contract_version": "1.0",
+        }
+        with mock.patch.object(api, "authenticated", side_effect=[
+                create_response, create_response, status_response, merge_response,
+            ]) as request, mock.patch.object(api, "record_flight") as record, \
+             mock.patch("builtins.print"):
+            api.cmd_change_set_create(create_args)
+            first_create = request.call_args
+            api.cmd_change_set_create(create_args)
+            second_create = request.call_args
+            api.cmd_pull_request_status(status_args)
+            api.cmd_pull_request_merge(merge_args)
+
+        self.assertEqual(first_create.args[1], "/v1/dev/repositories/repo%2F1/change-sets")
+        self.assertEqual(first_create.kwargs["method"], "POST")
+        self.assertEqual(first_create.kwargs["body"], {
+            "head_ref": "agent/demo-0.1.0",
+            "expected_head_commit_sha": commit,
+            "title": "Publish demo 0.1.0",
+            "body": "Validated Agent source",
+        })
+        self.assertEqual(first_create.kwargs["idempotency_key"],
+                         second_create.kwargs["idempotency_key"])
+        self.assertTrue(first_create.kwargs["idempotency_key"].startswith(
+            "agentour-change-set-create-"))
+        status_call = request.call_args_list[2]
+        self.assertEqual(status_call.args[1],
+                         "/v1/dev/repositories/repo%2F1/pull-requests/7")
+        self.assertNotIn("idempotency_key", status_call.kwargs)
+        merge_call = request.call_args_list[3]
+        self.assertEqual(merge_call.args[1],
+                         "/v1/dev/repositories/repo%2F1/pull-requests/7/merge")
+        self.assertEqual(merge_call.kwargs["method"], "POST")
+        self.assertEqual(merge_call.kwargs["body"], {
+            "expected_head_commit_sha": commit, "required_approvals": 0,
+        })
+        self.assertTrue(merge_call.kwargs["idempotency_key"].startswith(
+            "agentour-pull-request-merge-"))
+        for flight_call in record.call_args_list:
+            self.assertNotIn("title", flight_call.kwargs)
+            self.assertNotIn("body", flight_call.kwargs)
+
+    def test_pull_request_merge_defaults_to_zero_required_approvals(self):
+        api = load_api()
+        commit = "c" * 40
+        with mock.patch.object(api, "authenticated", return_value={
+                "repository_id": "repo_1", "pull_request_number": 9,
+                "status": "merged", "merged": True,
+                "head": {"commit_sha": commit},
+                "merge_commit_sha": "d" * 40, "contract_version": "1.0",
+            }) as request, mock.patch.object(api, "record_flight"), \
+             mock.patch("builtins.print"), mock.patch.object(api.sys, "argv", [
+                 "agentour_api.py", "--platform", "test", "pull-request-merge",
+                 "repo_1", "9", "--expected-head-commit-sha", commit,
+             ]):
+            api.main()
+        self.assertEqual(request.call_args.kwargs["body"]["required_approvals"], 0)
+
+    def test_pull_request_mutations_reject_nonimmutable_heads_before_network(self):
+        api = load_api()
+        create_args = SimpleNamespace(
+            repository_id="repo_1", head_ref="agent/demo", expected_head_commit_sha="main",
+            title="Demo", body="",
+        )
+        merge_args = SimpleNamespace(
+            repository_id="repo_1", pull_request_number=1,
+            expected_head_commit_sha="abc123", required_approvals=0,
+        )
+        with mock.patch.object(api, "authenticated") as request:
+            with self.assertRaises(SystemExit):
+                api.cmd_change_set_create(create_args)
+            with self.assertRaises(SystemExit):
+                api.cmd_pull_request_merge(merge_args)
+        request.assert_not_called()
+
+    def test_pull_request_commands_reject_contract_drift_before_recording(self):
+        api = load_api()
+        commit = "e" * 40
+        create_args = SimpleNamespace(
+            repository_id="repo_1", head_ref="agent/demo",
+            expected_head_commit_sha=commit, title="Demo", body="",
+        )
+        merge_args = SimpleNamespace(
+            repository_id="repo_1", pull_request_number=3,
+            expected_head_commit_sha=commit, required_approvals=0,
+        )
+        status_args = SimpleNamespace(repository_id="repo_1", pull_request_number=3)
+        malformed_create = {
+            "repository_id": "repo_1", "pull_request_number": 3, "status": "open",
+            "head": {"commit_sha": "f" * 40}, "contract_version": "1.0",
+        }
+        malformed_merge = {
+            "repository_id": "repo_1", "pull_request_number": 3, "status": "merged",
+            "merged": True, "head": {"commit_sha": commit},
+            "merge_commit_sha": None, "contract_version": "1.0",
+        }
+        malformed_status = {
+            "repository_id": "repo_1", "pull_request_number": 3, "status": "open",
+            "head": {"commit_sha": commit}, "reviews_total": "0",
+            "contract_version": "1.0",
+        }
+        with mock.patch.object(api, "authenticated", side_effect=[
+                malformed_create, malformed_merge, malformed_status,
+            ]), mock.patch.object(api, "record_flight") as record, \
+             mock.patch("builtins.print"):
+            with self.assertRaises(SystemExit):
+                api.cmd_change_set_create(create_args)
+            with self.assertRaises(SystemExit):
+                api.cmd_pull_request_merge(merge_args)
+            with self.assertRaises(SystemExit):
+                api.cmd_pull_request_status(status_args)
+        record.assert_not_called()
+
     def test_repository_control_commands_use_contract_1_routes(self):
         api = load_api()
         list_args = SimpleNamespace(platform="test", cursor="cursor_1", limit=25)
@@ -474,6 +612,17 @@ class PluginTests(unittest.TestCase):
             with self.subTest(length=length):
                 self.assertFalse(api.is_full_commit_sha("a" * length))
 
+    def test_commit_sha_argument_errors_name_the_exact_option(self):
+        api = load_api()
+        with self.assertRaisesRegex(
+                api.argparse.ArgumentTypeError,
+                "--source-commit-sha must be a full Commit SHA"):
+            api.full_commit_sha("main")
+        with self.assertRaisesRegex(
+                api.argparse.ArgumentTypeError,
+                "--expected-head-commit-sha must be a full Commit SHA"):
+            api.expected_head_commit_sha("main")
+
     def test_structured_api_error_preserves_codes_and_redacts_tokens(self):
         api = load_api()
         detail = json.dumps({
@@ -588,8 +737,10 @@ class PluginTests(unittest.TestCase):
         self.assertIn("source-build-status", result.stdout)
         self.assertIn("source-eval-status", result.stdout)
         for command in ("repositories", "repository-create", "repository-status",
-                        "agent-source-prepare", "agent-source-push", "git-clone", "git-push"):
+                        "agent-source-prepare", "agent-source-push", "git-clone", "git-push",
+                        "change-set-create", "pull-request-status", "pull-request-merge"):
             self.assertIn(command, result.stdout)
+            self.assertIn(command, guide)
         self.assertIn("agent-release", result.stdout)
         self.assertNotIn("release-submit-review", result.stdout)
 

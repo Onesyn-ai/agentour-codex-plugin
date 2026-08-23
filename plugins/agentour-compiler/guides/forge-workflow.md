@@ -23,6 +23,14 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   git-push <repository-id> <workspace> --commit-sha <full-commit-sha> --branch <branch>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  change-set-create <repository-id> --head-ref <branch> \
+  --expected-head-commit-sha <full-head-commit-sha> --title <title> [--body <body>]
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  pull-request-status <repository-id> <positive-pr-number>
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
+  pull-request-merge <repository-id> <positive-pr-number> \
+  --expected-head-commit-sha <full-head-commit-sha> [--required-approvals <count>]
+python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-revision <repository-id> <full-commit-sha> --pull-request-number <positive-pr-number>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-revision-status <source-revision-id>
@@ -46,6 +54,14 @@ create command derives a stable `Idempotency-Key` from its immutable identifiers
 read the existing Build/Eval resource and never submit replacement work. `agent-release` is the only
 publication command: Core remains the authority for Commit/tree/source, Review, Drive Snapshot,
 immutable Tag, Forge Release, Agent Version, and all gate lineage.
+
+`change-set-create` asks Core to create or idempotently recover the PR for one exact pushed head.
+`pull-request-status` reads current Provider PR and Review facts; it does not create or alter a Review.
+`pull-request-merge` binds the same exact head and lets Core/Forge enforce branch policy and the requested
+approval count. Its `--required-approvals` default is `0`; this never turns the author into a reviewer or
+fabricates an approval. When policy requires independent Review, obtain that Review through the platform
+workflow, reread the PR facts, and pass the required count. Use only the merge Commit returned by Core for
+the subsequent Source Revision; never infer it from the branch head.
 
 The Git wrappers are the sole exception to deterministic replay: Core deliberately never replays a
 plaintext Git credential. Each wrapper invocation uses one fresh Idempotency-Key, keeps the credential
@@ -107,12 +123,12 @@ Never turn a non-retryable contract failure into a blind retry. A transport inte
 Source/Build/Eval/Release submission resumes the same resource. A Git credential response interruption
 cannot replay plaintext; do not log the response or guess a credential.
 
-## External blockers
+## PR and Review boundary
 
-Do not invent endpoints or fall back to long-lived Forgejo credentials. Repository creation, projection
-status, short-lived HTTPS clone/push, Source Revision, Build, Eval, Release, and Release transitions are
-available in contract `1.0`. The complete Compiler workflow still requires Core to freeze and implement
-developer Commit-detail, branch/ChangeSet/PR creation, and PR/Review/branch-protection reads. Navigation
-URLs alone are insufficient for automated Review. Until those routes exist, the Plugin may push a named
-branch and report `review_pending`, but it must not claim that Review passed or that local/unpushed files,
-a missing Source Revision, a submitted Job, or a non-active Release are published.
+Do not invent endpoints or fall back to long-lived Forgejo credentials. Contract `1.0` exposes
+ChangeSet/PR creation, PR/Review fact reads, and policy-checked merge through the Core developer API.
+The Plugin never submits a Review, never performs author self-review, and never treats a navigation URL,
+an open PR, or a requested approval count as approval evidence. A rejected merge remains `review_pending`;
+report the structured Core/Forge error and preserve the same Repository, PR number, head Commit and
+checkpoint for recovery. Local or unpushed files, a missing Source Revision, a submitted Job, or a
+non-active Release are never described as published.

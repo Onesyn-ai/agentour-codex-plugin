@@ -156,9 +156,10 @@ old claims blindly.
 
 Read `guides/forge-workflow.md` before using managed Repository source. Use only the frozen Core
 developer routes implemented by `agentour_api.py`: `repositories`, `repository-create`,
-`repository-status`, `repository`, `agent-source-prepare`, `agent-source-push`, `git-clone`, `git-push`, `source-revision`,
+`repository-status`, `repository`, `agent-source-prepare`, `agent-source-push`, `git-clone`, `git-push`,
+`change-set-create`, `pull-request-status`, `pull-request-merge`, `source-revision`,
 `source-revision-status`, `source-build`, `source-build-status`, `source-eval`,
-`source-eval-status`, and `agent-release`. These commands send deterministic idempotency keys; Core
+`source-eval-status`, and `agent-release`. Mutating commands send deterministic idempotency keys; Core
 derives and validates all Commit/tree/Build/Eval/Review/Drive Snapshot/Tag/Release lineage.
 
 Repository creation uses `/v1/forge/repositories`. `git-clone` and `git-push` obtain a one-time
@@ -175,11 +176,14 @@ current remote Job ID, contract version, and stage. Restore it with `restore-for
 Commit changed, discard the old remote Job and resume from `commit_changed`. Never place a Core token,
 Git credential, URL credential, secret, or Drive credential in checkpoint state.
 
-Commit-detail/branch/ChangeSet/PR creation and Review reads remain external blockers until Core exposes
-the exact public contracts listed in the guide. Do not invent an endpoint, use a long-lived Forgejo PAT,
-treat the local directory as source authority, or describe an unpushed Commit / missing Source Revision
-as published. After Repository creation, wait for `repository-status` to report an active, converged
-projection before requesting Git access.
+After pushing an exact head, use `change-set-create` to create or recover its PR, then use
+`pull-request-status` for current Provider PR and Review facts. The Plugin never submits a Review or
+performs author self-review. `pull-request-merge` defaults `--required-approvals` to `0`, but Core/Forge
+remain authoritative for branch policy and independent Review; a policy rejection stays
+`review_pending`. Use the returned merge Commit for Source Revision creation. Do not invent an endpoint,
+use a long-lived Forgejo PAT, treat the local directory as source authority, or describe an unpushed
+Commit / missing Source Revision as published. After Repository creation, wait for `repository-status`
+to report an active, converged projection before requesting Git access.
 
 For both new Agents and “更新我的 xxx Agent”, run `agent-source-prepare` with the immutable Agent ID
 and canonical name. Pass `--repository-id` whenever Core already binds the Agent to a Repository.

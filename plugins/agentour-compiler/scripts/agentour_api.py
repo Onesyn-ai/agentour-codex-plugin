@@ -294,11 +294,19 @@ def pull_request_number(value: str) -> int:
                        option="--pull-request-number")
 
 
-def full_commit_sha(value: str) -> str:
+def commit_sha_argument(value: str, *, option: str) -> str:
     normalized = str(value or "").lower()
     if not _FULL_COMMIT_SHA.fullmatch(normalized):
-        raise argparse.ArgumentTypeError("--source-commit-sha must be a full Commit SHA")
+        raise argparse.ArgumentTypeError(f"{option} must be a full Commit SHA")
     return normalized
+
+
+def full_commit_sha(value: str) -> str:
+    return commit_sha_argument(value, option="--source-commit-sha")
+
+
+def expected_head_commit_sha(value: str) -> str:
+    return commit_sha_argument(value, option="--expected-head-commit-sha")
 
 
 def is_full_commit_sha(value: str) -> bool:
@@ -657,6 +665,123 @@ def cmd_repository(args):
     result = authenticated(args, f"/v1/dev/repositories/{rid}")
     record_flight("repository_read", repository_id=args.repository_id,
                   contract_version=result.get("contract_version", FORGE_CONTRACT_VERSION))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def validate_pull_request_response(result, *, repository_id: str,
+                                   pull_request_number: int | None = None,
+                                   expected_head_commit_sha: str = "",
+                                   require_merged: bool = False) -> tuple[int, str, str]:
+    """Fail closed when Core's frozen PR response is not Commit-bound."""
+    if not isinstance(result, dict):
+        raise SystemExit("Core Pull Request response is invalid")
+    try:
+        response_number = int(result.get("pull_request_number"))
+    except (TypeError, ValueError) as exc:
+        raise SystemExit("Core Pull Request response is invalid") from exc
+    head = result.get("head") if isinstance(result.get("head"), dict) else {}
+    head_commit = str(head.get("commit_sha") or "").lower()
+    merge_commit = str(result.get("merge_commit_sha") or "").lower()
+    if (str(result.get("repository_id") or "") != repository_id or
+            response_number < 1 or
+            (pull_request_number is not None and response_number != pull_request_number) or
+            not is_full_commit_sha(head_commit) or
+            (expected_head_commit_sha and head_commit != expected_head_commit_sha.lower()) or
+            str(result.get("contract_version") or "") != FORGE_CONTRACT_VERSION):
+        raise SystemExit("Core Pull Request response is not Commit-bound")
+    if require_merged and (result.get("merged") is not True or
+                           str(result.get("status") or "") != "merged" or
+                           not is_full_commit_sha(merge_commit)):
+        raise SystemExit("Core Pull Request merge response is not immutable")
+    return response_number, head_commit, merge_commit
+
+
+def cmd_change_set_create(args):
+    """Create or recover one Core-managed Pull Request for an exact pushed head."""
+    if not is_full_commit_sha(args.expected_head_commit_sha):
+        raise SystemExit("change-set-create requires a full expected head Commit SHA")
+    rid = urllib.parse.quote(args.repository_id, safe="")
+    body = {
+        "head_ref": args.head_ref,
+        "expected_head_commit_sha": args.expected_head_commit_sha.lower(),
+        "title": args.title,
+        "body": args.body,
+    }
+    key = stable_idempotency_key(
+        "change-set-create", args.repository_id, args.head_ref,
+        args.expected_head_commit_sha.lower(), args.title, args.body,
+    )
+    result = authenticated(
+        args, f"/v1/dev/repositories/{rid}/change-sets",
+        method="POST", body=body, idempotency_key=key,
+    )
+    response_number, head_commit, _ = validate_pull_request_response(
+        result, repository_id=args.repository_id,
+        expected_head_commit_sha=args.expected_head_commit_sha,
+    )
+    record_flight(
+        "change_set_created", repository_id=args.repository_id,
+        pull_request_number=response_number, commit_sha=head_commit,
+        status=result.get("status"), contract_version=result["contract_version"],
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_pull_request_status(args):
+    """Read current Provider PR and Review facts without changing them."""
+    rid = urllib.parse.quote(args.repository_id, safe="")
+    result = authenticated(
+        args,
+        f"/v1/dev/repositories/{rid}/pull-requests/{args.pull_request_number}",
+    )
+    _, head_commit, _ = validate_pull_request_response(
+        result, repository_id=args.repository_id,
+        pull_request_number=args.pull_request_number,
+    )
+    reviews_total = result.get("reviews_total")
+    if (isinstance(reviews_total, bool) or not isinstance(reviews_total, int) or
+            reviews_total < 0):
+        raise SystemExit("Core Pull Request Review response is invalid")
+    record_flight(
+        "pull_request_read", repository_id=args.repository_id,
+        pull_request_number=args.pull_request_number,
+        commit_sha=head_commit, status=result.get("status"),
+        reviews_total=reviews_total, contract_version=result["contract_version"],
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_pull_request_merge(args):
+    """Ask Core to merge an exact PR head after authoritative policy checks."""
+    if not is_full_commit_sha(args.expected_head_commit_sha):
+        raise SystemExit("pull-request-merge requires a full expected head Commit SHA")
+    rid = urllib.parse.quote(args.repository_id, safe="")
+    expected_head = args.expected_head_commit_sha.lower()
+    body = {
+        "expected_head_commit_sha": expected_head,
+        "required_approvals": args.required_approvals,
+    }
+    key = stable_idempotency_key(
+        "pull-request-merge", args.repository_id,
+        str(args.pull_request_number), expected_head, str(args.required_approvals),
+    )
+    result = authenticated(
+        args,
+        f"/v1/dev/repositories/{rid}/pull-requests/{args.pull_request_number}/merge",
+        method="POST", body=body, idempotency_key=key,
+    )
+    _, _, merge_commit = validate_pull_request_response(
+        result, repository_id=args.repository_id,
+        pull_request_number=args.pull_request_number,
+        expected_head_commit_sha=expected_head, require_merged=True,
+    )
+    record_flight(
+        "pull_request_merged", repository_id=args.repository_id,
+        pull_request_number=args.pull_request_number,
+        commit_sha=merge_commit,
+        required_approvals=args.required_approvals,
+        status=result.get("status"), contract_version=result["contract_version"],
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -1484,6 +1609,26 @@ def main():
     repository_status.add_argument("repository_id")
     repository = sub.add_parser("repository")
     repository.add_argument("repository_id")
+    change_set_create = sub.add_parser(
+        "change-set-create", help="create or recover a PR for one exact pushed head")
+    change_set_create.add_argument("repository_id")
+    change_set_create.add_argument("--head-ref", required=True)
+    change_set_create.add_argument("--expected-head-commit-sha", required=True,
+                                   type=expected_head_commit_sha)
+    change_set_create.add_argument("--title", required=True)
+    change_set_create.add_argument("--body", default="")
+    pull_request_status = sub.add_parser(
+        "pull-request-status", help="read current PR and Review facts")
+    pull_request_status.add_argument("repository_id")
+    pull_request_status.add_argument("pull_request_number", type=pull_request_number)
+    pull_request_merge = sub.add_parser(
+        "pull-request-merge", help="merge one exact PR head through Core policy")
+    pull_request_merge.add_argument("repository_id")
+    pull_request_merge.add_argument("pull_request_number", type=pull_request_number)
+    pull_request_merge.add_argument("--expected-head-commit-sha", required=True,
+                                    type=expected_head_commit_sha)
+    pull_request_merge.add_argument("--required-approvals", type=lambda value: bounded_int(
+        value, minimum=0, maximum=100, option="--required-approvals"), default=0)
     source_prepare = sub.add_parser("agent-source-prepare")
     source_prepare.add_argument("workspace")
     source_prepare.add_argument("--agent-id", required=True)
@@ -1647,6 +1792,12 @@ def main():
         cmd_repository_status(args)
     elif args.command == "repository":
         cmd_repository(args)
+    elif args.command == "change-set-create":
+        cmd_change_set_create(args)
+    elif args.command == "pull-request-status":
+        cmd_pull_request_status(args)
+    elif args.command == "pull-request-merge":
+        cmd_pull_request_merge(args)
     elif args.command == "agent-source-prepare":
         cmd_agent_source_prepare(args)
     elif args.command == "agent-source-push":
