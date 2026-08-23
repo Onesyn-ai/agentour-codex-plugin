@@ -91,7 +91,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.3+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.4+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -613,6 +613,46 @@ class PluginTests(unittest.TestCase):
         payload = json.loads(output.call_args.args[0])
         self.assertTrue(payload["platform_choice_required"])
         self.assertFalse(payload["ready_for_interview"])
+
+    def test_optional_fix_tasks_404_is_treated_as_retired_capability(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test")
+        error = api.APIResponseError(404, "Agentour API 404: {}")
+        with mock.patch.object(api, "authenticated", side_effect=error), \
+             mock.patch.object(api, "record_flight") as record:
+            result = api.optional_collection(
+                args, "/v1/dev/fix-tasks?limit=200", capability="accepted_fix_tasks")
+        self.assertEqual(result, [])
+        record.assert_called_once_with(
+            "optional_capability_unavailable",
+            platform="test",
+            capability="accepted_fix_tasks",
+            endpoint="/v1/dev/fix-tasks",
+            http_status=404,
+            behavior="treated_as_empty_collection",
+        )
+
+    def test_optional_fix_tasks_preserves_non_404_failures(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test")
+        for status in (400, 401, 403, 429, 500, 503):
+            with self.subTest(status=status), \
+                 mock.patch.object(api, "authenticated", side_effect=api.APIResponseError(
+                     status, f"Agentour API {status}: {{}}")), \
+                 mock.patch.object(api, "record_flight") as record, \
+                 self.assertRaises(api.APIResponseError):
+                api.optional_collection(
+                    args, "/v1/dev/fix-tasks?limit=200",
+                    capability="accepted_fix_tasks")
+            record.assert_not_called()
+
+    def test_optional_fix_tasks_rejects_malformed_success(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test")
+        with mock.patch.object(api, "authenticated", return_value={"data": []}), \
+             self.assertRaisesRegex(SystemExit, "accepted_fix_tasks response must be a list"):
+            api.optional_collection(
+                args, "/v1/dev/fix-tasks?limit=200", capability="accepted_fix_tasks")
 
     def test_static_validator_generates_platform_package_lock(self):
         with tempfile.TemporaryDirectory() as temp:

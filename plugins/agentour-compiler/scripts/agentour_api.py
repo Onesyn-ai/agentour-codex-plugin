@@ -82,6 +82,14 @@ class APITransportError(RuntimeError):
     """A retryable transport failure. POST callers must not blindly resubmit."""
 
 
+class APIResponseError(SystemExit):
+    """Structured HTTP failure without retaining arbitrary response content."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
 def redact_sensitive(value, key: str = ""):
     """Redact credential-shaped values and values stored under secret-bearing keys."""
     if _SECRET_KEY.search(key):
@@ -162,7 +170,7 @@ def request(platform: str, path: str, *, method: str = "GET",
                 time.sleep(0.5 * (2 ** attempt))
                 continue
             if auth and exc.code==401:delete_credentials(platform)
-            raise SystemExit(format_api_error(exc.code, detail)) from exc
+            raise APIResponseError(exc.code, format_api_error(exc.code, detail)) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt + 1 < attempts:
                 time.sleep(0.5 * (2 ** attempt))
@@ -218,6 +226,27 @@ def authenticated(args, path: str, *, method: str = "GET", body: dict | None = N
     return request(args.platform, path, method=method, data=data, auth=True,
                    extra_headers=headers,required_scopes=required_scopes,
                    interactive_auth=interactive_auth)
+
+
+def optional_collection(args, path: str, *, capability: str) -> list:
+    """Read a retired optional collection while failing closed for every other error."""
+    try:
+        result = authenticated(args, path)
+    except APIResponseError as exc:
+        if exc.status != 404:
+            raise
+        record_flight(
+            "optional_capability_unavailable",
+            platform=args.platform,
+            capability=capability,
+            endpoint=path.split("?", 1)[0],
+            http_status=404,
+            behavior="treated_as_empty_collection",
+        )
+        return []
+    if not isinstance(result, list):
+        raise SystemExit(f"{capability} response must be a list")
+    return result
 
 
 def stable_idempotency_key(operation: str, *parts: str) -> str:
@@ -1049,7 +1078,8 @@ def cmd_bootstrap(args):
         contract = authenticated(args, "/v1/dev/compiler-contract")
         models = discover_models(args)
         tasks = authenticated(args, "/v1/dev/compiler-tasks?active=true")
-        fix_tasks = authenticated(args, "/v1/dev/fix-tasks?limit=200")
+        fix_tasks = optional_collection(
+            args, "/v1/dev/fix-tasks?limit=200", capability="accepted_fix_tasks")
     except (SystemExit,OAuthClientError) as exc:
         result.update({"platform": platform, "blocked": True, "error": str(exc)})
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
