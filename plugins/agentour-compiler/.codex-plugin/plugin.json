@@ -1,7 +1,7 @@
 {
   "name": "agentour-compiler",
-  "version": "0.9.1+codex.20260819184723",
-  "description": "Create, update or reconstruct Agentour Agents and execute resumable AIO design tasks with validation and publishing.",
+  "version": "0.9.1+codex.20260823182222",
+  "description": "Create, update or reconstruct Agentour Agents with validation and publishing.",
   "author": {
     "name": "Agentour Platform",
     "email": "jerry.h2oslabs@gmail.com",
@@ -26,8 +26,7 @@
     "category": "Development",
     "capabilities": [
       "Interactive",
-      "Write",
-      "AIO Design"
+      "Write"
     ],
     "websiteURL": "https://github.com/Onesyn-ai/agentour-codex-plugin",
     "defaultPrompt": [
