@@ -91,7 +91,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.2+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.3+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -982,23 +982,68 @@ class PluginTests(unittest.TestCase):
                 "AGENTOUR_OAUTH_BUNDLE_TEST":bundle},clear=False):
             self.assertEqual(module.get_credentials("test")["tenant_id"],"ten_1")
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows DPAPI integration test")
+    def test_windows_dpapi_round_trip_large_unicode_bundle_and_delete(self):
+        path = PLUGIN / "scripts/credential_store.py"
+        spec = importlib.util.spec_from_file_location("credential_store_dpapi", path)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        marker = "秘密-🚀-" + ("长" * 6000)
+        bundle={"credential_type":"oauth_public_client_v1","client_id":"agentour-codex-plugin",
+            "access_token":"oa_"+marker,"refresh_token":"or_"+marker,
+            "expires_at":9999999999,"issuer":"https://identity.test",
+            "subject":"用户-管理员","scopes":["openid","agent:write"]}
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ, {
+                "AGENTOUR_CREDENTIAL_BACKEND":"windows-dpapi",
+                "AGENTOUR_DPAPI_DIRECTORY":temp}, clear=False):
+            self.assertEqual(module.set_credentials("test",bundle),"windows-dpapi")
+            encrypted=pathlib.Path(temp)/"agentour-compiler-test.dpapi"
+            self.assertTrue(encrypted.is_file())
+            self.assertNotIn(marker.encode("utf-8"),encrypted.read_bytes())
+            self.assertEqual(module.get_credentials("test"),bundle)
+            replacement={**bundle,"subject":"替换用户","access_token":"new_"+marker}
+            module.set_credentials("test",replacement)
+            self.assertEqual(module.get_credentials("test"),replacement)
+            self.assertNotIn(marker.encode("utf-8"),encrypted.read_bytes())
+            module.delete_credentials("test")
+            self.assertFalse(encrypted.exists())
+            self.assertEqual(module.get_credentials("test"),{})
+
     def test_failed_keychain_never_writes_plaintext_fallback(self):
         path = PLUGIN / "scripts/credential_store.py"
         spec = importlib.util.spec_from_file_location("credential_store_fallback", path)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as temp, \
              mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": temp,
-                                          "AGENTOUR_CREDENTIAL_BACKEND": "windows-credential-manager"}), \
+                                          "AGENTOUR_CREDENTIAL_BACKEND": "windows-dpapi"}), \
              mock.patch.object(module, "_ps", return_value=SimpleNamespace(
                  returncode=1, stdout="", stderr="unavailable")):
             bundle={"credential_type":"oauth_public_client_v1","client_id":"agentour-codex-plugin",
                 "access_token":"oa_access","refresh_token":"or_refresh","expires_at":9999999999,
                 "issuer":"https://identity.test","subject":"user","scopes":["openid"]}
-            with self.assertRaisesRegex(RuntimeError, "Credential Manager is unavailable"):
+            with self.assertRaisesRegex(RuntimeError, "CREDENTIAL_STORE_WRITE_FAILED"):
                 module.set_credentials("production",bundle)
-            self.assertEqual(module.get_credentials("production"),{})
+            with mock.patch.object(module, "_ps", return_value=SimpleNamespace(
+                    returncode=2, stdout="", stderr="")):
+                self.assertEqual(module.get_credentials("production"),{})
             credential = pathlib.Path(temp) / "agentour/credentials.json"
             self.assertFalse(credential.exists())
+
+    def test_windows_dpapi_failures_have_stable_redacted_codes(self):
+        path = PLUGIN / "scripts/credential_store.py"
+        spec = importlib.util.spec_from_file_location("credential_store_errors", path)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(os.environ, {
+                "AGENTOUR_CREDENTIAL_BACKEND":"windows-dpapi",
+                "AGENTOUR_DPAPI_DIRECTORY":temp}, clear=False):
+            encrypted=pathlib.Path(temp)/"agentour-compiler-test.dpapi"
+            encrypted.write_bytes(b"corrupt")
+            with mock.patch.object(module,"_ps",return_value=SimpleNamespace(
+                    returncode=1,stdout="",stderr="System.Security.Cryptography.CryptographicException")):
+                with self.assertRaisesRegex(RuntimeError,"CREDENTIAL_STORE_READ_FAILED") as read:
+                    module.get_credentials("test")
+                self.assertNotIn(str(encrypted),str(read.exception))
+                with self.assertRaisesRegex(RuntimeError,"CREDENTIAL_STORE_DELETE_FAILED"):
+                    module.delete_credentials("test")
 
     def test_package_tarball(self):
         api = load_api()

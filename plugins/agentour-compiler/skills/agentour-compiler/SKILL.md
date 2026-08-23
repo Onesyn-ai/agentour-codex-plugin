@@ -104,9 +104,10 @@ If no valid credential is stored, `bootstrap` starts a one-time `127.0.0.1` call
 entropy PKCE S256 verifier/challenge plus state and nonce, and opens the selected Core authorization
 page. The user signs in through Logto and approves there. The Plugin validates issuer, audience,
 subject, scope, expiry, state and nonce before continuing. Refresh Token rotation and replay handling
-are automatic. The credential script selects Windows Credential Manager, macOS Keychain, Linux Secret
-Service, or WSL bridging, separated by testing/production. If no operating-system credential store is
-available, stop; never persist OAuth credentials in a plaintext fallback file.
+are automatic. The credential script selects a Windows CurrentUser DPAPI-encrypted store, macOS
+Keychain, Linux Secret Service, or WSL bridging, separated by testing/production. The Windows store
+supports large rotating OAuth bundles and never writes their plaintext to disk. If no operating-system
+credential store is available, stop; never persist OAuth credentials in a plaintext fallback file.
 
 Validate or reauthorize immediately:
 
