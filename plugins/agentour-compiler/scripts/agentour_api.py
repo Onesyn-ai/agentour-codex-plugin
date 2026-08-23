@@ -11,6 +11,7 @@ import os
 import pathlib
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -939,6 +940,17 @@ def plugin_update_decision(current: str, latest: str) -> tuple[bool, str]:
     return False, "same_identity"
 
 
+def codex_cli_command() -> list[str]:
+    """Resolve the Codex launcher to an executable subprocess can start directly."""
+    names = ("codex.cmd", "codex.exe", "codex") if os.name == "nt" else ("codex",)
+    for name in names:
+        resolved = shutil.which(name)
+        if resolved:
+            return [resolved]
+    raise FileNotFoundError(
+        "Codex CLI executable was not found on PATH; install Codex and restart the shell")
+
+
 def check_update(*, auto: bool) -> dict:
     try:
         with urllib.request.urlopen(LATEST_MANIFEST_URL, timeout=15) as response:
@@ -956,11 +968,16 @@ def check_update(*, auto: bool) -> dict:
               "outdated": outdated, "updated": False,
               "comparison_reason": reason}
     if outdated and auto:
+        try:
+            codex = codex_cli_command()
+        except FileNotFoundError as exc:
+            result["error"] = str(exc)
+            return result
         refresh = subprocess.run(
-            ["codex", "plugin", "marketplace", "upgrade", "agentour-platform"],
+            [*codex, "plugin", "marketplace", "upgrade", "agentour-platform"],
             text=True, capture_output=True, encoding="utf-8", errors="replace")
         completed = (subprocess.run(
-            ["codex", "plugin", "add", "agentour-compiler@agentour-platform"],
+            [*codex, "plugin", "add", "agentour-compiler@agentour-platform"],
             text=True, capture_output=True, encoding="utf-8", errors="replace")
                      if refresh.returncode == 0 else refresh)
         result["updated"] = refresh.returncode == 0 and completed.returncode == 0

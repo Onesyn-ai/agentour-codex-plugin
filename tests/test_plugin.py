@@ -91,7 +91,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.1+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.2+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -154,6 +154,39 @@ class PluginTests(unittest.TestCase):
             self.assertTrue(result["restart_required"])
             self.assertEqual(result["comparison_reason"], reason)
             self.assertEqual(installer.call_count, 2)
+
+    def test_windows_update_resolves_codex_cmd_launcher(self):
+        api = load_api()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "version": "0.9.2+codex.20260824001553"
+        }).encode()
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with mock.patch.object(api, "PLUGIN_VERSION", "0.9.1+codex.20260823114231"), \
+             mock.patch.object(api.urllib.request, "urlopen", return_value=response), \
+             mock.patch.object(api.os, "name", "nt"), \
+             mock.patch.object(api.shutil, "which", side_effect=lambda name: (
+                 r"C:\Tools\codex.cmd" if name == "codex.cmd" else None)), \
+             mock.patch.object(api.subprocess, "run", return_value=completed) as installer:
+            result = api.check_update(auto=True)
+        self.assertTrue(result["updated"])
+        self.assertEqual(installer.call_args_list[0].args[0][0], r"C:\Tools\codex.cmd")
+        self.assertEqual(installer.call_args_list[1].args[0][0], r"C:\Tools\codex.cmd")
+
+    def test_missing_codex_launcher_fails_update_without_crashing(self):
+        api = load_api()
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "version": "0.9.2+codex.20260824001553"
+        }).encode()
+        with mock.patch.object(api, "PLUGIN_VERSION", "0.9.1+codex.20260823114231"), \
+             mock.patch.object(api.urllib.request, "urlopen", return_value=response), \
+             mock.patch.object(api.shutil, "which", return_value=None), \
+             mock.patch.object(api.subprocess, "run") as installer:
+            result = api.check_update(auto=True)
+        self.assertFalse(result["updated"])
+        self.assertIn("not found on PATH", result["error"])
+        installer.assert_not_called()
 
     def test_current_newer_version_does_not_downgrade(self):
         api = load_api()
