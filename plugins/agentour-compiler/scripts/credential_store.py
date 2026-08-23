@@ -117,16 +117,24 @@ def get_credentials(platform: str) -> dict:
     raw=_get_secret(platform)
     try:value=json.loads(raw)
     except (TypeError,json.JSONDecodeError):return {}
-    if not isinstance(value,dict) or value.get("credential_type")!="oauth_public_client_v1":return {}
+    if (not isinstance(value,dict) or value.get("credential_type") not in
+            {"oauth_public_client_v1","tenant_access_token_v1"}):return {}
     return value
 
 
 def set_credentials(platform: str, credentials: dict) -> str:
-    required={"credential_type","client_id","access_token","refresh_token","expires_at",
-              "issuer","subject","scopes"}
+    credential_type=str(credentials.get("credential_type") or "") if isinstance(credentials,dict) else ""
+    required=({"credential_type","client_id","access_token","refresh_token","expires_at",
+               "issuer","subject","scopes"} if credential_type=="oauth_public_client_v1" else
+              {"credential_type","access_token","expires_at","scopes","api_origin","tenant_id"})
     if not isinstance(credentials,dict) or not required.issubset(credentials):
         raise ValueError("OAuth credential bundle is incomplete")
     return _set_secret(platform,json.dumps(credentials,separators=(",",":"),sort_keys=True))
+
+
+def set_tenant_credentials(platform: str, credentials: dict) -> str:
+    value={**credentials,"credential_type":"tenant_access_token_v1"}
+    return set_credentials(platform,value)
 
 
 def delete_credentials(platform: str) -> None:

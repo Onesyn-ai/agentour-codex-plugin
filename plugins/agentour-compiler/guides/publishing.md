@@ -14,6 +14,13 @@ lineage.
 
 Before uploading, show the destination host, Agent ID, version, visibility, fidelity grade, and unsupported capabilities. Never publish to a remote platform without authorization.
 
+The credential bundle is the sole identity authority. A platform OAuth bundle uses the platform
+account. A `tenant_access_token_v1` bundle uses its bound API origin and short-lived tenant token
+without opening platform OAuth or asking the operator to select an identity type. The Plugin never
+sends a caller-supplied tenant ID or caller ID. With a tenant credential, `private` means visible only
+to the creating internal caller and `public` means tenant-wide visibility; neither setting publishes
+the Agent outside the tenant. Global publication is a separate tenant-owner and platform-review flow.
+
 Run `remote-build` only after final confirmation. Cached responses are successful evidence and
 do not consume quota. Treat `429` as a quota wait condition, not as a retry invitation. Repair
 deterministic structured Gate failures before resubmitting, and use `cancel-build <job-id>` for a

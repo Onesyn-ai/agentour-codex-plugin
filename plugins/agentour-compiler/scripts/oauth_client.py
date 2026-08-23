@@ -141,6 +141,13 @@ def login(platform: str,base_url: str,*,timeout: float=300,
 def access_token(platform: str,base_url: str,*,interactive: bool=False,
                  required_scopes: tuple[str,...]=())->str:
     credentials=get_credentials(platform)
+    if credentials.get("credential_type")=="tenant_access_token_v1":
+        granted=set(credentials.get("scopes") or [])
+        if not required_scopes or set(required_scopes).issubset(granted):
+            if float(credentials.get("expires_at") or 0)>time.time()+30:
+                return str(credentials["access_token"])
+            raise OAuthClientError("TENANT_ACCESS_TOKEN_EXPIRED")
+        raise OAuthClientError("TENANT_ACCESS_SCOPE_REQUIRED")
     required=set(BASE_SCOPES).union(required_scopes)
     granted=set(credentials.get("scopes") or []) if credentials else set()
     if credentials and required.issubset(granted) and \

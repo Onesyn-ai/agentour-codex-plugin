@@ -316,6 +316,18 @@ class PluginTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 api._read_source_metadata(workspace)
 
+    def test_agent_collection_binding_is_established_before_source_release(self):
+        api = load_api()
+        args = SimpleNamespace(platform="test")
+        response = {"agent_id": "agt_1", "repository_id": "repo_1",
+                    "collection_id": "core:agt_1"}
+        with mock.patch.object(api, "authenticated", return_value=response) as request:
+            self.assertEqual(api._ensure_agent_collection(args, "agt_1", "repo_1"), response)
+        call = request.call_args
+        self.assertEqual(call.args[1], "/v1/plugin/agents/agt_1/collection:ensure")
+        self.assertEqual(call.kwargs["required_scopes"],
+                         ("agent:write", "drive:file:write"))
+
     def test_agent_source_push_refuses_preexisting_staged_changes(self):
         api = load_api()
         with tempfile.TemporaryDirectory() as td:
@@ -916,6 +928,26 @@ class PluginTests(unittest.TestCase):
                 "AGENTOUR_OAUTH_BUNDLE_PRODUCTION":bundle("prod-user")}, clear=False):
             self.assertEqual(module.get_credentials("test")["subject"],"test-user")
             self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
+
+    def test_tenant_credentials_select_the_bound_api_without_platform_oauth(self):
+        api=load_api()
+        bundle={"credential_type":"tenant_access_token_v1","access_token":"tt_short",
+            "expires_at":9999999999,"scopes":["agent:read","agent:publish"],
+            "api_origin":"https://tenant-gateway.example","tenant_id":"ten_1"}
+        with mock.patch.object(api,"get_credentials",return_value=bundle):
+            self.assertEqual(api.base_url("production"),"https://tenant-gateway.example")
+
+    def test_tenant_credentials_are_accepted_by_secure_store_contract(self):
+        path=PLUGIN/"scripts/credential_store.py"
+        spec=importlib.util.spec_from_file_location("credential_store_tenant",path)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        bundle=json.dumps({"credential_type":"tenant_access_token_v1",
+            "access_token":"tt_short","expires_at":9999999999,
+            "scopes":["agent:read"],"api_origin":"https://gateway.example",
+            "tenant_id":"ten_1"})
+        with mock.patch.dict(os.environ,{"AGENTOUR_CREDENTIAL_BACKEND":"environment",
+                "AGENTOUR_OAUTH_BUNDLE_TEST":bundle},clear=False):
+            self.assertEqual(module.get_credentials("test")["tenant_id"],"ten_1")
 
     def test_failed_keychain_never_writes_plaintext_fallback(self):
         path = PLUGIN / "scripts/credential_store.py"

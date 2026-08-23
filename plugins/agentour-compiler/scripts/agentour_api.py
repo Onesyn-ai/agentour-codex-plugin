@@ -28,7 +28,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from credential_store import delete_credentials
+from credential_store import delete_credentials,get_credentials
 from oauth_client import OAuthClientError,access_token
 from flight_recorder import read as read_flight, record as record_flight, record_job_sample
 
@@ -121,6 +121,15 @@ def format_api_error(status: int, detail: str) -> str:
 
 
 def base_url(platform: str) -> str:
+    credentials=get_credentials(platform)
+    if credentials.get("credential_type")=="tenant_access_token_v1":
+        value=str(credentials.get("api_origin") or "").rstrip("/")
+        parsed=urllib.parse.urlparse(value)
+        loopback=parsed.hostname in {"127.0.0.1","localhost","::1"}
+        if (parsed.scheme=="https" or (parsed.scheme=="http" and loopback)) and parsed.netloc and \
+                not parsed.username and not parsed.password and parsed.path in {"","/"}:
+            return value
+        raise SystemExit("TENANT_API_ORIGIN_INVALID")
     return PLATFORMS[platform]["url"]
 
 
@@ -491,6 +500,24 @@ def _wait_repository_active(args, repository: dict) -> dict:
     return current
 
 
+def _ensure_agent_collection(args, agent_id: str, repository_id: str) -> dict:
+    operation = stable_idempotency_key("agent-collection", agent_id, repository_id)
+    result = authenticated(
+        args,
+        f"/v1/plugin/agents/{urllib.parse.quote(agent_id, safe='')}/collection:ensure",
+        method="POST",
+        body={"repository_id": repository_id, "operation_id": operation},
+        idempotency_key=operation,
+        required_scopes=("agent:write", "drive:file:write"),
+        interactive_auth=True,
+    )
+    if (str(result.get("agent_id") or "") != agent_id or
+            str(result.get("repository_id") or "") != repository_id or
+            not str(result.get("collection_id") or "")):
+        raise SystemExit("Agentour Collection binding response is invalid")
+    return result
+
+
 def cmd_agent_source_prepare(args):
     """Resolve/create the owned Repository and safely prepare an update workspace."""
     workspace = pathlib.Path(args.workspace).expanduser().resolve()
@@ -500,6 +527,7 @@ def cmd_agent_source_prepare(args):
     if not repository_id:
         raise SystemExit("Core Repository response has no immutable Repository ID")
     default_branch = str(repository.get("default_branch") or args.default_branch)
+    _ensure_agent_collection(args, args.agent_id, repository_id)
     metadata = _read_source_metadata(workspace)
     if metadata and (str(metadata.get("agent_id")) != args.agent_id or
                      str(metadata.get("repository_id")) != repository_id):
@@ -690,6 +718,7 @@ def cmd_agent_release(args):
         "pull_request_number": args.pull_request_number,
         "required_approvals": args.required_approvals,
         "release_notes": args.release_notes,
+        "visibility": getattr(args,"visibility","private"),
     }
     result = authenticated(
         args,
@@ -1322,19 +1351,7 @@ def cmd_restore_checkpoint(args):
 
 
 def cmd_upload_references(args):
-    binding_operation = stable_idempotency_key(
-        "agent-collection", args.agent_id, args.repository_id)
-    binding = authenticated(
-        args,
-        f"/v1/plugin/agents/{urllib.parse.quote(args.agent_id, safe='')}/collection:ensure",
-        method="POST",
-        body={"repository_id": args.repository_id, "operation_id": binding_operation},
-        idempotency_key=binding_operation,
-    )
-    if (str(binding.get("agent_id") or "") != args.agent_id or
-            str(binding.get("repository_id") or "") != args.repository_id or
-            not str(binding.get("collection_id") or "")):
-        raise SystemExit("Agentour Collection binding response is invalid")
+    binding = _ensure_agent_collection(args, args.agent_id, args.repository_id)
     try:
         token = access_token(args.platform, base_url(args.platform))
     except OAuthClientError as exc:
@@ -1410,7 +1427,7 @@ def main():
     repositories.add_argument("--cursor", default="")
     repositories.add_argument("--limit", type=repository_limit, default=100)
     repository_create = sub.add_parser("repository-create")
-    repository_create.add_argument("--kind", choices=("agent", "workflow", "knowledge", "eval"),
+    repository_create.add_argument("--kind", choices=("agent", "knowledge", "eval"),
                                    default="agent")
     repository_create.add_argument("--name", required=True)
     repository_create.add_argument("--default-branch", default="main")
@@ -1489,6 +1506,7 @@ def main():
     agent_release.add_argument("--required-approvals", type=lambda value: bounded_int(
         value, minimum=0, maximum=100, option="--required-approvals"), default=0)
     agent_release.add_argument("--release-notes", default="")
+    agent_release.add_argument("--visibility", choices=("private", "public"), default="private")
     save_forge_checkpoint = sub.add_parser("save-forge-checkpoint")
     save_forge_checkpoint.add_argument("--path", default=".agentour/forge-checkpoint.json")
     save_forge_checkpoint.add_argument("--repository-id", required=True)

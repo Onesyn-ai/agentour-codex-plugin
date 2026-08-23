@@ -201,12 +201,14 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   agent-release --agent-id <agent-id> --version <version> --source-ref <branch-or-ref> \
   --source-revision-id <source-revision-id> --source-commit-sha <full-commit-sha> \
   --pull-request-number <number> --required-approvals <count> \
-  --release-notes <text>
+  --release-notes <text> --visibility <private|public>
 ```
 
 This single operation merges the reviewed change, freezes the Drive Collection snapshot, creates the
 immutable Tag and Forge Release, and records the Core Agent Version. Retry the same inputs with the same
 derived operation ID; never create a Tag, Forge Release, or platform version directly from the Plugin.
+For a tenant credential, `public` means visible inside that tenant only. It never requests global
+platform publication; only the tenant owner can submit that separate platform-level request.
 
 ### 5B. Existing Agent inventory
 
