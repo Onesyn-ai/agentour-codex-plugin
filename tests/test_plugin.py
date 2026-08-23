@@ -91,7 +91,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.4+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.5+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -343,6 +343,9 @@ class PluginTests(unittest.TestCase):
         })
         self.assertTrue(merge_call.kwargs["idempotency_key"].startswith(
             "agentour-pull-request-merge-"))
+        self.assertEqual(merge_call.kwargs["required_scopes"],
+                         ("repository:release",))
+        self.assertTrue(merge_call.kwargs["interactive_auth"])
         for flight_call in record.call_args_list:
             self.assertNotIn("title", flight_call.kwargs)
             self.assertNotIn("body", flight_call.kwargs)

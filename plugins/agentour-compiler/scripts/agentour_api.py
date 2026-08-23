@@ -769,6 +769,7 @@ def cmd_pull_request_merge(args):
         args,
         f"/v1/dev/repositories/{rid}/pull-requests/{args.pull_request_number}/merge",
         method="POST", body=body, idempotency_key=key,
+        required_scopes=("repository:release",), interactive_auth=True,
     )
     _, _, merge_commit = validate_pull_request_response(
         result, repository_id=args.repository_id,
