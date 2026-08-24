@@ -523,6 +523,58 @@ class PluginTests(unittest.TestCase):
             issue.assert_not_called()
             self.assertIn("already has staged changes", str(raised.exception))
 
+    def test_agent_source_push_projects_exact_package_at_repository_root(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as td:
+            workspace = pathlib.Path(td)
+            subprocess.run(["git", "-C", str(workspace), "init", "-b", "main"], check=True,
+                           capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(workspace), "config", "user.name", "Plugin Test"],
+                           check=True)
+            subprocess.run(["git", "-C", str(workspace), "config", "user.email",
+                            "plugin-test@example.invalid"], check=True)
+            (workspace / "README.md").write_text("initial\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(workspace), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(workspace), "commit", "-m", "initial"], check=True,
+                           capture_output=True, text=True)
+            api._write_source_metadata(workspace, agent_id="agt_1",
+                                       repository_id="repo_1", default_branch="main")
+            package = workspace / "packages" / "agt_1"
+            (package / "payload" / "agent").mkdir(parents=True)
+            expected = {
+                "agentour.json": b'{"id":"agt_1"}\n',
+                "README.md": b"agent readme\n",
+                "payload/agent/agent.ts": b"export const agent = true\n",
+            }
+            for relative, content in expected.items():
+                target = package / pathlib.PurePosixPath(relative)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+            (workspace / "AGENT_SPEC.md").write_text("compiler-only", encoding="utf-8")
+            args = SimpleNamespace(workspace=str(workspace), agent_id="agt_1",
+                                   repository_id="repo_1", path=["packages/agt_1"],
+                                   message="feat: project package", branch="agent/agt_1",
+                                   credential_ttl=900, credential_max_uses=20, timeout=30)
+            credential = {"clone_url": "https://forge.example.invalid/repo.git",
+                          "username": "git", "credential": "secret"}
+            with mock.patch.object(api, "issue_git_credential", return_value=credential), \
+                 mock.patch.object(api, "run_git_with_credential") as push, \
+                 mock.patch.object(api, "record_flight"):
+                api.cmd_agent_source_push(args)
+            commit = subprocess.run(["git", "-C", str(workspace), "rev-parse", "HEAD"],
+                                    check=True, capture_output=True, text=True).stdout.strip()
+            tree_paths = subprocess.run(
+                ["git", "-C", str(workspace), "ls-tree", "-r", "--name-only", commit],
+                check=True, capture_output=True, text=True).stdout.splitlines()
+            self.assertEqual(tree_paths, sorted(expected))
+            self.assertNotIn("packages/agt_1/agentour.json", tree_paths)
+            self.assertNotIn("AGENT_SPEC.md", tree_paths)
+            for relative, content in expected.items():
+                blob = subprocess.run(["git", "-C", str(workspace), "show",
+                                       f"{commit}:{relative}"], check=True, capture_output=True).stdout
+                self.assertEqual(blob, content)
+            push.assert_called_once()
+
     def test_git_credential_limits_fail_before_network_exchange(self):
         api = load_api()
         with mock.patch.object(api, "authenticated") as request:
@@ -701,8 +753,8 @@ class PluginTests(unittest.TestCase):
             api.cmd_source_build_status(build_args)
             api.cmd_source_eval_status(eval_args)
         self.assertEqual(request.call_args_list[0].args[1], "/v1/dev/source-revisions/sr_1")
-        self.assertEqual(request.call_args_list[1].args[1], "/v1/dev/builds/bld%2F1")
-        self.assertEqual(request.call_args_list[2].args[1], "/v1/dev/eval-runs/evr%2F1")
+        self.assertEqual(request.call_args_list[1].args[1], "/v1/dev/source-builds/bld%2F1")
+        self.assertEqual(request.call_args_list[2].args[1], "/v1/dev/source-eval-runs/evr%2F1")
     def test_forge_status_commands_record_redacted_lineage_only(self):
         api = load_api()
         build_args = SimpleNamespace(platform="test", build_id="bld_1")

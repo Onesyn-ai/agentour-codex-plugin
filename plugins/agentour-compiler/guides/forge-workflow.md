@@ -75,9 +75,14 @@ owned canonical-name match exists, and persists only the immutable Agent/Reposit
 `.agentour/source.json`. It never guesses from a folder name. Explicit refs win; otherwise a proven
 local binding wins, followed by the latest default branch. Clean workspaces may fast-forward. Dirty,
 locally-ahead, and diverged workspaces are preserved and require an explicit safe resolution.
-`agent-source-push` refuses existing staged changes and stages only repeated explicit `--path` values,
-so unrelated workspace files are not silently included. It pushes an exact Commit through a fresh
-short-lived credential. The Plugin never creates the platform release Tag or Forge Release directly.
+`agent-source-push` accepts exactly one explicit `--path` pointing to a validated Package directory.
+It snapshots that Package, clears only the Git index, and projects the Package bytes to Repository
+root, so `agentour.json` is always at root. The resulting Commit tree must exactly equal the Package
+file list: legacy `packages/<agent-id>/...`, `.agentour`, Compiler specs, flight records, and unrelated
+workspace files cannot enter the Commit. Existing staged changes, tracked Compiler state, symlinks,
+or tracked changes outside the selected Package fail closed. Removed tracked paths are recorded in the
+redacted flight event. It pushes the exact Commit through a fresh short-lived credential. The Plugin
+never creates the platform release Tag or Forge Release directly.
 
 Unified release uses a deterministic `Idempotency-Key` derived from immutable inputs. Retry the same
 command after interruption; Core serializes that operation and returns the retained completed or failed

@@ -193,8 +193,11 @@ Never infer a Repository from the directory name. A dirty local workspace is pre
 the explicit `--use-local` choice; it must never be reset. Fast-forward a clean workspace only when
 the fetched Commit proves ancestry. If local and remote diverge, stop for merge, rebase, or a new
 branch. A locally-ahead Commit remains local authority and must not be discarded.
-After Package validation, use `agent-source-push` with only explicit workspace-relative Package paths.
-It refuses pre-existing staged changes, commits only those paths, and pushes the exact resulting Commit
+After Package validation, use `agent-source-push` with exactly one explicit workspace-relative Package
+directory. It refuses pre-existing staged changes, snapshots only that Package, maps its bytes to the
+managed Repository root, and verifies the Commit tree exactly matches the Package file list. Compiler
+state, flight records, Specs, legacy `packages/<agent-id>` paths, and unrelated workspace files must
+not enter the Commit. It pushes the exact Commit
 through a fresh short-lived Core credential. Never stage the entire workspace implicitly. Core—not the
 Plugin—creates immutable release Tags and Forge Releases after all source and Drive gates pass.
 

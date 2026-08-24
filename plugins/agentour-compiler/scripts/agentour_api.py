@@ -614,7 +614,7 @@ def cmd_agent_source_prepare(args):
 
 
 def cmd_agent_source_push(args):
-    """Commit only explicit Agent paths and push one exact Commit without storing credentials."""
+    """Map one validated Package to Repository root and push one exact Commit."""
     workspace = pathlib.Path(args.workspace).expanduser().resolve()
     if not (workspace / ".git").exists():
         raise SystemExit("Agent source workspace is not a Git repository")
@@ -624,6 +624,8 @@ def cmd_agent_source_push(args):
         raise SystemExit("Local Agent/Repository binding does not match the push request")
     if _git(workspace, "diff", "--cached", "--name-only"):
         raise SystemExit("Workspace already has staged changes; commit or unstage them first")
+    if len(args.path) != 1:
+        raise SystemExit("Agent source push requires exactly one Package directory")
     selected: list[str] = []
     for raw_path in args.path:
         candidate = (workspace / raw_path).resolve()
@@ -634,7 +636,46 @@ def cmd_agent_source_push(args):
         if relative in {"", ".", ".git"} or relative.startswith(".git/"):
             raise SystemExit("Agent source path cannot include Git control data")
         selected.append(relative)
-    _git(workspace, "add", "--", *selected)
+    package_root = workspace / selected[0]
+    if not package_root.is_dir() or not (package_root / "agentour.json").is_file():
+        raise SystemExit("Agent source path must be a Package directory containing agentour.json")
+    package_files: dict[str, bytes] = {}
+    for item in sorted(package_root.rglob("*")):
+        if item.is_symlink():
+            raise SystemExit("Agent Package cannot contain symbolic links")
+        if not item.is_file():
+            continue
+        relative = item.relative_to(package_root).as_posix()
+        if relative == ".agentour" or relative.startswith((".agentour/", ".git/")):
+            raise SystemExit("Agent Package cannot contain Compiler or Git control data")
+        package_files[relative] = item.read_bytes()
+    if not package_files:
+        raise SystemExit("Agent Package is empty")
+    tracked = [item for item in _git(workspace, "ls-files").splitlines() if item]
+    if any(item == ".agentour" or item.startswith(".agentour/") for item in tracked):
+        raise SystemExit("Repository contains tracked Compiler state; remove it before pushing")
+    dirty = [item for item in _git(workspace, "diff", "--name-only").splitlines() if item]
+    package_prefix = selected[0].rstrip("/") + "/"
+    unexpected_dirty = [item for item in dirty if not item.startswith(package_prefix)]
+    if unexpected_dirty:
+        raise SystemExit("Workspace has tracked changes outside the selected Package")
+
+    # A managed Agent Repository is an immutable projection of exactly one Package. Clear the
+    # index (not the working files), then stage only the snapshotted Package bytes at Repository
+    # root. Compiler state and unrelated untracked workspace files can therefore never leak in.
+    if tracked:
+        _git(workspace, "rm", "-r", "--cached", "--ignore-unmatch", "--", ".")
+    for relative, content in package_files.items():
+        destination = workspace / pathlib.PurePosixPath(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+    root_paths = sorted(package_files)
+    _git(workspace, "add", "--", *root_paths)
+    tree = _git(workspace, "write-tree")
+    tree_paths = [item for item in _git(workspace, "ls-tree", "-r", "--name-only", tree).splitlines()
+                  if item]
+    if tree_paths != root_paths:
+        raise SystemExit("Staged Agent Repository tree does not exactly match the Package root")
     staged = _git(workspace, "diff", "--cached", "--name-only")
     if staged:
         _git(workspace, "commit", "-m", args.message)
@@ -653,7 +694,9 @@ def cmd_agent_source_push(args):
          f"{commit_sha}:refs/heads/{branch}"],
         credential, cwd=workspace, timeout=args.timeout)
     record_flight("agent_source_pushed", agent_id=args.agent_id,
-                  repository_id=args.repository_id, commit_sha=commit_sha, branch=branch)
+                  repository_id=args.repository_id, commit_sha=commit_sha, branch=branch,
+                  package_path=selected[0], package_files=len(root_paths),
+                  removed_tracked_paths=sorted(set(tracked) - set(root_paths)))
     print(json.dumps({"agent_id": args.agent_id, "repository_id": args.repository_id,
                       "commit_sha": commit_sha, "branch": branch, "pushed": True},
                      ensure_ascii=False, indent=2))
@@ -828,7 +871,7 @@ def cmd_source_build(args):
 def cmd_source_build_status(args):
     """Read an existing Source Revision Build without resubmitting work."""
     build_id = urllib.parse.quote(args.build_id, safe="")
-    result = authenticated(args, f"/v1/dev/builds/{build_id}")
+    result = authenticated(args, f"/v1/dev/source-builds/{build_id}")
     record_flight("source_build_read", remote_job_id=args.build_id,
                   source_revision_id=result.get("source_revision_id"),
                   status=result.get("status"), error_code=result.get("error_code"),
@@ -850,7 +893,7 @@ def cmd_source_eval(args):
 def cmd_source_eval_status(args):
     """Read an existing Source Revision Eval without resubmitting work."""
     eval_run_id = urllib.parse.quote(args.eval_run_id, safe="")
-    result = authenticated(args, f"/v1/dev/eval-runs/{eval_run_id}")
+    result = authenticated(args, f"/v1/dev/source-eval-runs/{eval_run_id}")
     record_flight("source_eval_read", remote_job_id=args.eval_run_id,
                   source_revision_id=result.get("source_revision_id"),
                   build_id=result.get("build_id"), status=result.get("status"),
@@ -1649,7 +1692,7 @@ def main():
     source_push.add_argument("--agent-id", required=True)
     source_push.add_argument("--repository-id", required=True)
     source_push.add_argument("--path", action="append", required=True,
-                             help="workspace-relative Agent path; repeat as needed")
+                             help="one workspace-relative validated Package directory; its contents are mapped to Repository root")
     source_push.add_argument("--message", required=True)
     source_push.add_argument("--branch", default="")
     source_push.add_argument("--credential-ttl", type=credential_ttl, default=900)
