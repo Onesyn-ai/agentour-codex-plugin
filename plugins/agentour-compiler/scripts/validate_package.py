@@ -26,7 +26,13 @@ TEMPLATE_PLACEHOLDER = re.compile(
     r"\b(?:AGENT_ID|AGENT_NAME|AGENT_DESCRIPTION|CAPABILITY_ID|CAPABILITY_DISPLAY_NAME|"
     r"MODEL_ID|ROLE_NAME|RESPONSIBILITY|OUTPUT_REQUIREMENTS|"
     r"DELIVERABLE_ACCEPTANCE_CRITERIA|COMPLETE_SELF_CONTAINED_INPUT|"
-    r"INCOMPLETE_INPUT|EXPECTED_OUTPUT|EXAMPLE_[1-9]|AUTHOR_NAME|TAG_[1-9]|GREETING_TEXT)\b")
+    r"INCOMPLETE_INPUT|EXPECTED_OUTPUT|EXAMPLE_[1-9]|AUTHOR_NAME|TAG_[1-9]|GREETING_TEXT|"
+    r"AGENT_GOAL|INITIAL_USER_INTENT|DEVELOPMENT_DECISIONS|COMPILER_WORKFLOW_SUMMARY|"
+    r"DEVELOPMENT_AI_INPUTS|DEVELOPMENT_AI_OUTPUTS|RUNTIME_INPUT_CONTRACT|"
+    r"RUNTIME_OUTPUT_CONTRACT|WORKFLOW_AND_RULES|REFERENCE_MATERIALS|"
+    r"INTERFACES_AND_TOOLS|SAFETY_AND_APPROVALS|VALIDATION_EVIDENCE|KNOWN_LIMITATIONS|"
+    r"AGENT_VERSION|RELEASE_DATE|OPERATION|CHANGE_OBJECTIVE|CHANGE_SUMMARY|"
+    r"COMPATIBILITY_NOTES|CHANGE_VALIDATION)\b")
 ENV_SECRET = re.compile(r"(?:process\.env\.|process\.env\[['\"])([A-Z][A-Z0-9_]{2,})")
 PLATFORM_UNSUPPORTED_ROUTE = re.compile(
     r"(?:AGENTOUR_URL|agentourURL|agentour\.ai)[^\n]{0,200}/v1/(?:images/generations|audio/|video/)", re.I)
@@ -110,11 +116,25 @@ def main() -> int:
     started = time.monotonic(); root = pathlib.Path(args.package).resolve()
     lock = generate_package_lock(root)
     critical: list[str] = []; warnings: list[str] = []; passed: list[str] = []
-    required = ["agentour.json", "README.md", "RELEASE.md", "tests/smoke.yaml",
+    required = ["agentour.json", "README.md", "RELEASE.md", "AGENT_WIKI.md", "tests/smoke.yaml",
                 "payload/package.json", "payload/pnpm-lock.yaml", "payload/agent/agent.ts",
                 "payload/agent/instructions.md"]
     missing = [item for item in required if not (root / item).is_file()]
     critical.extend("Missing file: " + item for item in missing)
+    wiki_path = root / "AGENT_WIKI.md"
+    if wiki_path.is_file():
+        wiki = wiki_path.read_text(encoding="utf-8", errors="replace")
+        required_wiki_sections = (
+            "Agent 目标", "开发对话流程概要", "AI 输入与输出", "工作流与业务规则",
+            "涉及资料与知识来源", "接口、工具与外部系统", "审批、安全与权限边界",
+            "验证与验收依据", "已知限制", "更新记录",
+        )
+        headings = set(re.findall(r"(?m)^##\s+(.+?)\s*$", wiki))
+        missing_wiki_sections = [item for item in required_wiki_sections if item not in headings]
+        if missing_wiki_sections:
+            critical.append("AGENT_WIKI.md missing sections: " + ", ".join(missing_wiki_sections))
+        if not re.search(r"(?m)^###\s+.+$", wiki.partition("## 更新记录")[2]):
+            critical.append("AGENT_WIKI.md must contain at least one versioned update entry")
     agent_root = root / "payload/agent"
     authored_sandboxes = sorted(
         path for path in agent_root.rglob("sandbox.ts") if path.is_file()

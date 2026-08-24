@@ -340,7 +340,21 @@ to claim that development used the latest official contract.
 
 ## Package generation
 
-Create each Package under `packages/<agent-id>/` from bundled templates with `agentour.json`, `README.md`, `RELEASE.md`, `tests/smoke.yaml`, and a complete `payload/` Eve project.
+Create each Package under `packages/<agent-id>/` from bundled templates with `agentour.json`, `README.md`, `RELEASE.md`, `AGENT_WIKI.md`, `tests/smoke.yaml`, and a complete `payload/` Eve project.
+
+Read `guides/agent-wiki.md` in full before creating, reconstructing, or updating Package files. Generate
+`AGENT_WIKI.md` as the sanitized initial Wiki for the Agent: it must summarize the complete development
+conversation flow, Agent objective, development-AI inputs and outputs, Runtime input/output contracts,
+reference materials, interfaces/tools/external systems, workflow, approvals/security, validation, and
+known limitations. It is Package content and may become public, so never paste a raw transcript,
+credentials, private reference contents, personal data, local absolute paths, signed URLs, or unrelated
+prompts. The terminal improvement-center flight recorder remains a separate required output.
+
+For updates, read and preserve the existing Wiki history, refresh current-state sections, and append one
+versioned change entry with objective, concrete changes, compatibility/migration notes, and verification.
+If the baseline has no Wiki, create it and explicitly mark unavailable historical conversation facts
+instead of inventing them. Update the Wiki before generating `package.lock`; if later validation or
+release evidence changes it, regenerate the lock and rerun affected Gates.
 
 Agentour currently supports E2B Runtime only. Do not create `payload/agent/sandbox.ts` or
 `payload/agent/sandbox/sandbox.ts`. The platform injects its audited single-layer `agentour-e2b`

@@ -51,6 +51,19 @@ class PluginTests(unittest.TestCase):
         files = {
             "README.md": "# Demo\n",
             "RELEASE.md": "# 0.1.0\n",
+            "AGENT_WIKI.md": (
+                "# Demo · Agent Wiki\n\n"
+                "## Agent 目标\nDemo\n\n"
+                "## 开发对话流程概要\nDemo\n\n"
+                "## AI 输入与输出\nDemo\n\n"
+                "## 工作流与业务规则\nDemo\n\n"
+                "## 涉及资料与知识来源\n不适用\n\n"
+                "## 接口、工具与外部系统\n不适用\n\n"
+                "## 审批、安全与权限边界\nDemo\n\n"
+                "## 验证与验收依据\nDemo\n\n"
+                "## 已知限制\nDemo\n\n"
+                "## 更新记录\n\n### 0.1.0 · 2026-08-25 · create\n- Initial\n"
+            ),
             "tests/smoke.yaml": 'schema_version: 1\ncases:\n  - send: "x"\n    expect_contains: "ok"\n',
             "payload/package.json": '{"engines":{"node":">=24"},"packageManager":"pnpm@10.23.0"}\n',
             "payload/pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
@@ -872,6 +885,42 @@ class PluginTests(unittest.TestCase):
             lock = json.loads((package / "package.lock").read_text(encoding="utf-8"))
             self.assertEqual(lock["generated_by"], "agentourcore.lockfile/1")
             self.assertNotIn("package.lock", lock["files"])
+
+    def test_static_validator_requires_agent_wiki(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            (package / "AGENT_WIKI.md").unlink()
+            result = subprocess.run([
+                sys.executable, str(PLUGIN / "scripts/validate_package.py"), str(package)
+            ], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Missing file: AGENT_WIKI.md", result.stdout)
+
+    def test_static_validator_rejects_incomplete_agent_wiki(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            wiki = package / "AGENT_WIKI.md"
+            wiki.write_text(wiki.read_text(encoding="utf-8").replace(
+                "## 已知限制", "## 其他限制"), encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(PLUGIN / "scripts/validate_package.py"), str(package)
+            ], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("AGENT_WIKI.md missing sections: 已知限制", result.stdout)
+
+    def test_static_validator_rejects_unresolved_agent_wiki_placeholders(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            wiki = package / "AGENT_WIKI.md"
+            wiki.write_text(wiki.read_text(encoding="utf-8") + "\nAGENT_GOAL\n", encoding="utf-8")
+            result = subprocess.run([
+                sys.executable, str(PLUGIN / "scripts/validate_package.py"), str(package)
+            ], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unresolved template placeholders in AGENT_WIKI.md: AGENT_GOAL", result.stdout)
 
     def test_compiler_skill_supports_update_and_adaptive_discovery(self):
         skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
