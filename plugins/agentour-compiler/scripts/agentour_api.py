@@ -171,7 +171,7 @@ def request(platform: str, path: str, *, method: str = "GET",
                 continue
             if auth and exc.code==401:delete_credentials(platform)
             raise APIResponseError(exc.code, format_api_error(exc.code, detail)) from exc
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             if attempt + 1 < attempts:
                 time.sleep(0.5 * (2 ** attempt))
                 continue
@@ -1202,7 +1202,7 @@ def discover_models(args) -> dict:
                                   "probe": {"elapsed_seconds": result.get("elapsed_seconds")}})
             else:
                 unavailable.append({"id": model_id, "error": result.get("error", "probe failed")})
-        except SystemExit as exc:
+        except (SystemExit, APITransportError) as exc:
             unavailable.append({"id": model_id, "error": str(exc)[:500]})
     available.sort(key=lambda item: (-int(item.get("quality_rank", 0)), item.get("id", "")))
     return {"object": "list", "data": available,

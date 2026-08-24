@@ -821,6 +821,34 @@ class PluginTests(unittest.TestCase):
         self.assertTrue(payload["platform_choice_required"])
         self.assertFalse(payload["ready_for_interview"])
 
+    def test_model_discovery_isolates_one_transport_failure(self):
+        api = load_api()
+        args = SimpleNamespace(platform="production")
+        discovered = {"data": [
+            {"id": "provider-disconnected", "quality_rank": 100},
+            {"id": "provider-available", "quality_rank": 90},
+        ]}
+        with mock.patch.object(api, "request", return_value=discovered), \
+             mock.patch.object(api, "authenticated", side_effect=[
+                 api.APITransportError("remote disconnected"),
+                 {"ok": True, "elapsed_seconds": 0.2},
+             ]):
+            result = api.discover_models(args)
+        self.assertEqual(result["recommended_model"], "provider-available")
+        self.assertEqual([item["id"] for item in result["data"]],
+                         ["provider-available"])
+        self.assertEqual(result["filtered_unavailable"], [{
+            "id": "provider-disconnected", "error": "remote disconnected"}])
+
+    def test_request_normalizes_remote_disconnect_without_traceback(self):
+        api = load_api()
+        with mock.patch.object(api, "base_url", return_value="https://agentour.example"), \
+             mock.patch.object(api.urllib.request, "urlopen",
+                               side_effect=ConnectionResetError("remote disconnected")):
+            with self.assertRaisesRegex(api.APITransportError,
+                                        "Cannot reach https://agentour.example"):
+                api.request("production", "/v1/dev/model-probe/example", method="POST")
+
     def test_optional_fix_tasks_404_is_treated_as_retired_capability(self):
         api = load_api()
         args = SimpleNamespace(platform="test")
