@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ import sys
 
 SERVICE = "agentour-compiler"
 PLATFORMS = {"test", "production"}
-WINDOWS_BACKEND = "windows-dpapi"
+WINDOWS_BACKEND = "windows-credential-manager"
 
 
 class CredentialStoreError(RuntimeError):
@@ -23,7 +24,7 @@ class CredentialStoreError(RuntimeError):
         self.operation = operation
         self.detail = detail if detail.replace(".", "").isalnum() else "unknown"
         super().__init__(
-            f"{code}: Windows DPAPI credential {operation} failed ({self.detail})")
+            f"{code}: Windows PasswordVault credential {operation} failed ({self.detail})")
 
 
 def _check(platform: str) -> str:
@@ -44,14 +45,17 @@ def _is_wsl() -> bool:
 
 
 def _powershell() -> str | None:
-    return shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
+    # PasswordVault's inbox WinRT projection is exposed by Windows PowerShell 5.1.
+    # A caller running in pwsh 7 still uses this desktop bridge; falling back to
+    # pwsh itself would fail type activation on modern .NET and must fail closed.
+    return shutil.which("powershell.exe") or shutil.which("powershell")
 
 
 def backend_name() -> str:
     forced = os.environ.get("AGENTOUR_CREDENTIAL_BACKEND", "").strip()
-    if forced in {"environment", WINDOWS_BACKEND, "windows-credential-manager", "macos-keychain",
+    if forced in {"environment", WINDOWS_BACKEND, "macos-keychain",
                   "linux-secret-service"}:
-        return WINDOWS_BACKEND if forced == "windows-credential-manager" else forced
+        return forced
     if os.environ.get("CI") or os.environ.get("AGENTOUR_CREDENTIALS_ENV_ONLY") == "1":
         return "environment"
     if sys.platform == "win32" or _is_wsl():
@@ -63,28 +67,44 @@ def backend_name() -> str:
     return "unavailable"
 
 
-def _windows_secret_path(platform: str) -> Path:
-    root = os.environ.get("AGENTOUR_DPAPI_DIRECTORY", "").strip()
-    if not root:
-        local = os.environ.get("LOCALAPPDATA", "").strip()
-        root = str(Path(local) / "Agentour" / "Credentials") if local else str(
-            Path.home() / "AppData" / "Local" / "Agentour" / "Credentials")
-    return Path(root) / f"{SERVICE}-{platform}.dpapi"
+def _windows_env(platform: str) -> dict[str, str]:
+    return {
+        "AGENTOUR_CREDENTIAL_RESOURCE": SERVICE,
+        "AGENTOUR_CREDENTIAL_ACCOUNT": f"{platform}:default",
+    }
 
 
-def _windows_env(path: Path) -> dict[str, str]:
-    return {"AGENTOUR_DPAPI_PATH": str(path)}
+_POWERSHELL_PREAMBLE = (
+    "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
+    "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+    "$vaultType=[Windows.Security.Credentials.PasswordVault,"
+    "Windows.Security.Credentials,ContentType=WindowsRuntime];"
+    "$credentialType=[Windows.Security.Credentials.PasswordCredential,"
+    "Windows.Security.Credentials,ContentType=WindowsRuntime];"
+    "$vault=[Activator]::CreateInstance($vaultType);")
+
+
+def _powershell_error(result: subprocess.CompletedProcess) -> str:
+    lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    return lines[-1] if lines else "unknown"
 
 
 def _ps(script: str, *, token: str | None = None,
         extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    executable = _powershell()
+    if not executable:
+        raise CredentialStoreError(
+            "CREDENTIAL_STORE_UNAVAILABLE", "open", "PowerShellUnavailable")
     env = os.environ.copy()
     if token is not None:
         env["AGENTOUR_CREDENTIAL_VALUE"] = token
     if extra_env:
         env.update(extra_env)
-    return subprocess.run([_powershell(), "-NoProfile", "-NonInteractive", "-Command", script],
-                          text=True, capture_output=True, env=env)
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    return subprocess.run(
+        [executable, "-NoLogo", "-NoProfile", "-NonInteractive",
+         "-EncodedCommand", encoded],
+        text=True, encoding="utf-8", errors="replace", capture_output=True, env=env)
 
 
 def _get_secret(platform: str) -> str:
@@ -95,21 +115,19 @@ def _get_secret(platform: str) -> str:
     backend = backend_name()
     account = f"{platform}:default"
     if backend == WINDOWS_BACKEND:
-        path = _windows_secret_path(platform)
-        script = ("try{if(!(Test-Path -LiteralPath $env:AGENTOUR_DPAPI_PATH)){exit 2};"
-                  "Add-Type -AssemblyName System.Security;"
-                  "$entropy=[Text.Encoding]::UTF8.GetBytes('Agentour.Compiler.OAuth.v1');"
-                  "$b=[IO.File]::ReadAllBytes($env:AGENTOUR_DPAPI_PATH);"
-                  "$p=[System.Security.Cryptography.ProtectedData]::Unprotect($b,$entropy,"
-                  "[System.Security.Cryptography.DataProtectionScope]::CurrentUser);"
-                  "[Console]::Out.Write([Text.Encoding]::UTF8.GetString($p))}"
-                  "catch{exit 1}")
-        result = _ps(script, extra_env=_windows_env(path))
+        script = (_POWERSHELL_PREAMBLE +
+                  "try{$credential=$vault.Retrieve($env:AGENTOUR_CREDENTIAL_RESOURCE,"
+                  "$env:AGENTOUR_CREDENTIAL_ACCOUNT);$credential.RetrievePassword();"
+                  "[Console]::Out.Write($credential.Password)}catch{$errorValue=$_.Exception;"
+                  "$inner=$errorValue.InnerException;if($errorValue.HResult -eq -2147023728 "
+                  "-or ($null -ne $inner -and $inner.HResult -eq -2147023728)){exit 2};"
+                  "[Console]::Error.Write($errorValue.GetType().FullName);exit 1}")
+        result = _ps(script, extra_env=_windows_env(platform))
         if result.returncode == 2:
             return ""
         if result.returncode != 0:
             raise CredentialStoreError("CREDENTIAL_STORE_READ_FAILED", "read",
-                                       result.stderr.strip())
+                                       _powershell_error(result))
         return result.stdout
     if backend == "macos-keychain":
         result = subprocess.run(["security", "find-generic-password", "-s", SERVICE,
@@ -132,23 +150,15 @@ def _set_secret(platform: str, value: str) -> str:
     if backend == "environment":
         raise RuntimeError(f"set {_env_name(platform)} in this non-interactive environment")
     if backend == WINDOWS_BACKEND:
-        path = _windows_secret_path(platform)
-        script = ("try{Add-Type -AssemblyName System.Security;"
-                  "$entropy=[Text.Encoding]::UTF8.GetBytes('Agentour.Compiler.OAuth.v1');"
-                  "$path=$env:AGENTOUR_DPAPI_PATH;$dir=[IO.Path]::GetDirectoryName($path);"
-                  "[IO.Directory]::CreateDirectory($dir)|Out-Null;"
-                  "$plain=[Text.Encoding]::UTF8.GetBytes($env:AGENTOUR_CREDENTIAL_VALUE);"
-                  "$cipher=[System.Security.Cryptography.ProtectedData]::Protect($plain,$entropy,"
-                  "[System.Security.Cryptography.DataProtectionScope]::CurrentUser);"
-                  "$tmp=$path+'.tmp-'+[Guid]::NewGuid().ToString('N');"
-                  "try{[IO.File]::WriteAllBytes($tmp,$cipher);Move-Item -LiteralPath $tmp "
-                  "-Destination $path -Force}finally{if(Test-Path -LiteralPath $tmp){"
-                  "Remove-Item -LiteralPath $tmp -Force}}}catch{"
+        script = (_POWERSHELL_PREAMBLE +
+                  "try{$credential=[Activator]::CreateInstance($credentialType,[object[]]@("
+                  "$env:AGENTOUR_CREDENTIAL_RESOURCE,$env:AGENTOUR_CREDENTIAL_ACCOUNT,"
+                  "$env:AGENTOUR_CREDENTIAL_VALUE));$vault.Add($credential)}catch{"
                   "[Console]::Error.Write($_.Exception.GetType().FullName);exit 1}")
-        result = _ps(script, token=value, extra_env=_windows_env(path))
+        result = _ps(script, token=value, extra_env=_windows_env(platform))
         if result.returncode != 0:
             raise CredentialStoreError("CREDENTIAL_STORE_WRITE_FAILED", "write",
-                                       result.stderr.strip())
+                                       _powershell_error(result))
     elif backend == "macos-keychain":
         subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account],
                        capture_output=True)
@@ -183,7 +193,8 @@ def set_credentials(platform: str, credentials: dict) -> str:
               {"credential_type","access_token","expires_at","scopes","api_origin","tenant_id"})
     if not isinstance(credentials,dict) or not required.issubset(credentials):
         raise ValueError("OAuth credential bundle is incomplete")
-    return _set_secret(platform,json.dumps(credentials,separators=(",",":"),sort_keys=True))
+    return _set_secret(platform,json.dumps(
+        credentials,ensure_ascii=False,separators=(",",":"),sort_keys=True))
 
 
 def set_tenant_credentials(platform: str, credentials: dict) -> str:
@@ -194,13 +205,17 @@ def set_tenant_credentials(platform: str, credentials: dict) -> str:
 def delete_credentials(platform: str) -> None:
     platform = _check(platform); backend = backend_name(); account = f"{platform}:default"
     if backend == WINDOWS_BACKEND:
-        path = _windows_secret_path(platform)
-        result = _ps("try{Remove-Item -LiteralPath $env:AGENTOUR_DPAPI_PATH -Force "
-                     "-ErrorAction SilentlyContinue}catch{exit 1}",
-                     extra_env=_windows_env(path))
+        script = (_POWERSHELL_PREAMBLE +
+                  "try{$credential=$vault.Retrieve($env:AGENTOUR_CREDENTIAL_RESOURCE,"
+                  "$env:AGENTOUR_CREDENTIAL_ACCOUNT);$vault.Remove($credential)}catch{"
+                  "$errorValue=$_.Exception;$inner=$errorValue.InnerException;"
+                  "if($errorValue.HResult -eq -2147023728 -or ($null -ne $inner -and "
+                  "$inner.HResult -eq -2147023728)){exit 0};"
+                  "[Console]::Error.Write($errorValue.GetType().FullName);exit 1}")
+        result = _ps(script, extra_env=_windows_env(platform))
         if result.returncode != 0:
             raise CredentialStoreError("CREDENTIAL_STORE_DELETE_FAILED", "delete",
-                                       result.stderr.strip())
+                                       _powershell_error(result))
     elif backend == "macos-keychain":
         subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account], capture_output=True)
     elif backend == "linux-secret-service":

@@ -1,20 +1,20 @@
 {
   "files": {
-    ".codex-plugin/plugin.json": "b0a75ddaaf0845a009d5756b92a779d5fd315ddc6bcd3ea7ce2c572d7eecbc72",
+    ".codex-plugin/plugin.json": "e08c79061edae2c1d6f9ee94f39bb240c381e81ec3a161fa3bb8be1a4823f5c5",
     "guides/feedback.md": "9c4401c0dd78d2f4cdcf073b7ef7ccad8f1f076807782ec3789d010e3dda8fc9",
     "guides/fidelity.md": "498ae5b11627721cc4d333ed9c4ff5ad085c971a7cc6622226ebf38818f75bfb",
     "guides/forge-workflow.md": "b121fd8f31895795048b30dfcd532580dd760a3e90f275a585032c7963cd77a2",
     "guides/publishing.md": "45561c3f0af779a8f51e1d1fb818c7804f59df5c903f81e362b709ebb83f7e34",
     "guides/runtime-ui.md": "3c248862806bf74ef79ada91c2474546cc31ea3584f7bb38553c04d1405b5c99",
     "scripts/agentour_api.py": "0452a874c89395e3e99376965986512684663f0d8650f341be1025a2d49bcb4a",
-    "scripts/credential_store.py": "060d385d5d3b224a7a01ac62b22a9de985d5db71686059b335c39b1ad279c445",
+    "scripts/credential_store.py": "ff9ae2e2e7ec5c68ab58e4d160076c83ef2bad022bbad752794d51a1cd64c41f",
     "scripts/fidelity_report.py": "010a1d1d64d59a5cd34183ff983d640d6e7bd374f3c101c3c64197e802dee303",
     "scripts/flight_recorder.py": "609d701d5991680669ca5ded6a9669e01d07b5b336aa39a5988b5eb990d2278f",
     "scripts/lark_cli_preflight.py": "1c2c09c79415c7459aa921de0e38dfb45b3affbd13f809a08474312e2cd5ef70",
     "scripts/oauth_client.py": "777735f325bb5466291be3a4123ec735d76ae22562a6545d852dae9071fde905",
     "scripts/validate_package.py": "cf2539ca21d501de8c851ec492298a2be838e6b019b03f5e65b8b0cfd4fe8f73",
     "skills/agentour-brainstorm/SKILL.md": "eb4089e40c4734421aace0cfb5586de56f5ed0a118c53b8e33a2f8553c398af4",
-    "skills/agentour-compiler/SKILL.md": "acf29dec2b0e6ab3d03dc584718bb5bbfa2fbbcdba3193b32cf7f325529ca3af",
+    "skills/agentour-compiler/SKILL.md": "4bd464f0c7199cc0aecf7f1c677bd8e342ec6788ffbf2d4e1cfc448f04363c3b",
     "skills/agentour-compiler/references/feishu-capabilities.md": "ac161c8be22f0f864c26978a4a973522d4df7e15dda79e548bc868318868f16e",
     "skills/agentour-grill-me/SKILL.md": "4fd2ddf92db8537351f84ba12397fa7ea338d04d6cf1e73ce1ac89fa4f851b6b",
     "skills/agentour-validator/SKILL.md": "53515510fe7a7191f61d6012b9b00c2dc8f04dc2d4f70d85b00cdc47a2569b83",
@@ -35,6 +35,6 @@
   "marketplace_name": "agentour-platform",
   "marketplace_source": "./plugins/agentour-compiler",
   "plugin_name": "agentour-compiler",
-  "plugin_version": "0.9.5+codex.20260824012131",
+  "plugin_version": "0.9.5+codex.20260824080939",
   "schema_version": 1
 }
