@@ -142,6 +142,7 @@ class PluginTests(unittest.TestCase):
             with self.subTest(current=current, latest=latest), \
                  mock.patch.object(api, "PLUGIN_VERSION", current), \
                  mock.patch.object(api.urllib.request, "urlopen") as urlopen, \
+                 mock.patch.object(api, "codex_cli_command", return_value=["codex"]), \
                  mock.patch.object(api.subprocess, "run", return_value=SimpleNamespace(
                      returncode=0, stdout="", stderr="")) as installer:
                 response = mock.MagicMock()
