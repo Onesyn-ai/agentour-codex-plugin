@@ -1,6 +1,7 @@
 {
   "files": {
     ".codex-plugin/plugin.json": "76fd786354f6c846493b7c3bcf27decdc8ed902b6c70ba695d06a16145e940b8",
+    "guides/agent-wiki.md": "f70134ab3a847083f9818a4feda2528f55c0ef3aada917d3eafcac04385fd23b",
     "guides/feedback.md": "9c4401c0dd78d2f4cdcf073b7ef7ccad8f1f076807782ec3789d010e3dda8fc9",
     "guides/fidelity.md": "498ae5b11627721cc4d333ed9c4ff5ad085c971a7cc6622226ebf38818f75bfb",
     "guides/forge-workflow.md": "b121fd8f31895795048b30dfcd532580dd760a3e90f275a585032c7963cd77a2",
@@ -12,12 +13,13 @@
     "scripts/flight_recorder.py": "609d701d5991680669ca5ded6a9669e01d07b5b336aa39a5988b5eb990d2278f",
     "scripts/lark_cli_preflight.py": "1c2c09c79415c7459aa921de0e38dfb45b3affbd13f809a08474312e2cd5ef70",
     "scripts/oauth_client.py": "777735f325bb5466291be3a4123ec735d76ae22562a6545d852dae9071fde905",
-    "scripts/validate_package.py": "cf2539ca21d501de8c851ec492298a2be838e6b019b03f5e65b8b0cfd4fe8f73",
+    "scripts/validate_package.py": "d672cac0ba7c7f555ddbadfb758935519076e1cf3fc981739e5cba214ef69670",
     "skills/agentour-brainstorm/SKILL.md": "eb4089e40c4734421aace0cfb5586de56f5ed0a118c53b8e33a2f8553c398af4",
-    "skills/agentour-compiler/SKILL.md": "4bd464f0c7199cc0aecf7f1c677bd8e342ec6788ffbf2d4e1cfc448f04363c3b",
+    "skills/agentour-compiler/SKILL.md": "3058bc26b988112d8782c499429a1e362309934b9cfa08c960ec7f5b58bdb09e",
     "skills/agentour-compiler/references/feishu-capabilities.md": "ac161c8be22f0f864c26978a4a973522d4df7e15dda79e548bc868318868f16e",
     "skills/agentour-grill-me/SKILL.md": "4fd2ddf92db8537351f84ba12397fa7ea338d04d6cf1e73ce1ac89fa4f851b6b",
     "skills/agentour-validator/SKILL.md": "53515510fe7a7191f61d6012b9b00c2dc8f04dc2d4f70d85b00cdc47a2569b83",
+    "templates/AGENT_WIKI.md": "d787b13b8a4a1ae0beeb81bd891c2322db84e5dd4a0839de8782449a38bb27a4",
     "templates/README.md": "f7d1c19c7c28909e4b9b6cbf332560afe1f12fb1ba7cf7e9429113707a0a9e31",
     "templates/RELEASE.md": "c70e6e13178024c8ce05ffcdf0d065693128536802f6246e584fe3769f4f55c1",
     "templates/agent.ts": "04beb54dadcf15c955aebce6df3c351dd559d6c6e93f7ca588ae2369b8549222",
