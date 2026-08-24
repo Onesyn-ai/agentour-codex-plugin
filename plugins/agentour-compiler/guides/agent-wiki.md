@@ -13,8 +13,8 @@ Agent's visibility. It is distinct from all of the following:
 
 Write the Wiki from the complete evidence available in the current Compiler run: the user's
 development conversation, `AGENT_SPEC.md`, conversion inventory/map when present, selected reference
-materials, manifest, Package implementation, Smoke/Eval evidence, and the final verified release
-facts. Summarize; do not paste a raw transcript.
+materials, manifest, Package implementation, Smoke/Eval evidence, and verified publication facts that
+already exist for an update baseline. Summarize; do not paste a raw transcript.
 
 The Wiki must contain these exact H2 headings:
 
@@ -72,8 +72,10 @@ the Package version. For reconstruction, describe which behavior came from sourc
 came from the current user conversation. Do not claim historical decisions that were not preserved.
 
 Generate the draft before local validation so it is included in `package.lock`. After Validation,
-Build, Eval, or Release facts change, update the evidence/current-state sections, regenerate the lock,
-and rerun affected validation before publishing.
+Build, or Eval facts change, update the evidence/current-state sections, regenerate the lock, and rerun
+affected validation before publishing. Do not mutate the frozen Package after publication merely to add
+the resulting release-operation ID: report that terminal outcome in the separate flight recorder, then
+record the prior release as verified baseline history when the Agent is next updated.
 
 ## Update behavior
 
