@@ -1,7 +1,7 @@
 {
   "files": {
-    ".codex-plugin/plugin.json": "76fd786354f6c846493b7c3bcf27decdc8ed902b6c70ba695d06a16145e940b8",
-    "guides/agent-wiki.md": "f70134ab3a847083f9818a4feda2528f55c0ef3aada917d3eafcac04385fd23b",
+    ".codex-plugin/plugin.json": "6ceb79316bce11c30f40df6c5514bef7ce482ec92ee762f1be6701486d83e30f",
+    "guides/agent-wiki.md": "342a750122e501e64e251a9e118a557e471635b9edc3f5a87039736350e9b4ce",
     "guides/feedback.md": "9c4401c0dd78d2f4cdcf073b7ef7ccad8f1f076807782ec3789d010e3dda8fc9",
     "guides/fidelity.md": "498ae5b11627721cc4d333ed9c4ff5ad085c971a7cc6622226ebf38818f75bfb",
     "guides/forge-workflow.md": "b121fd8f31895795048b30dfcd532580dd760a3e90f275a585032c7963cd77a2",
@@ -37,6 +37,6 @@
   "marketplace_name": "agentour-platform",
   "marketplace_source": "./plugins/agentour-compiler",
   "plugin_name": "agentour-compiler",
-  "plugin_version": "0.9.5+codex.20260824155705",
+  "plugin_version": "0.9.5+codex.20260824221039",
   "schema_version": 1
 }
