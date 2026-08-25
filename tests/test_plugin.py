@@ -1249,6 +1249,13 @@ class PluginTests(unittest.TestCase):
         self.assertIn("agent-release", guide)
         self.assertIn("legacy direct package upload", guide)
 
+    def test_compiler_keeps_agent_id_distinct_from_repository_canonical_name(self):
+        skill = (PLUGIN / "skills/agentour-compiler/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("copied byte-for-byte", skill)
+        self.assertIn("Never derive, slugify, normalize, or repair an Agent ID", skill)
+        self.assertIn("AGENT_SOURCE_ID_MISMATCH", skill)
+        self.assertIn("bound_agent_id", skill)
+
     def test_default_flight_log_is_outside_package(self):
         script = PLUGIN / "scripts/flight_recorder.py"
         spec = importlib.util.spec_from_file_location("agentour_flight_path_test", script)

@@ -187,6 +187,12 @@ to report an active, converged projection before requesting Git access.
 
 For both new Agents and “更新我的 xxx Agent”, run `agent-source-prepare` with the immutable Agent ID
 and canonical name. Pass `--repository-id` whenever Core already binds the Agent to a Repository.
+The two identifiers are deliberately different domains: `--agent-id` must always be copied byte-for-byte
+from the Package manifest or an existing Core binding, while `--name` is the Repository canonical name
+and may normalize characters such as `_` to `-`. Never derive, slugify, normalize, or repair an Agent ID
+from a Repository name. If Core returns `AGENT_SOURCE_ID_MISMATCH`, resume with the returned
+`bound_agent_id` and the same Repository ID after confirming that it matches the Package manifest;
+never migrate the binding, create a replacement Repository, or retry the mismatched ID.
 Baseline priority is strict: an explicit `--ref` (full Commit, immutable Tag, or Branch), then a valid
 local `.agentour/source.json` Agent ID + Repository ID binding, then the latest remote default branch.
 Never infer a Repository from the directory name. A dirty local workspace is preserved and requires

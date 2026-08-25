@@ -15,7 +15,7 @@
     "scripts/oauth_client.py": "777735f325bb5466291be3a4123ec735d76ae22562a6545d852dae9071fde905",
     "scripts/validate_package.py": "d672cac0ba7c7f555ddbadfb758935519076e1cf3fc981739e5cba214ef69670",
     "skills/agentour-brainstorm/SKILL.md": "eb4089e40c4734421aace0cfb5586de56f5ed0a118c53b8e33a2f8553c398af4",
-    "skills/agentour-compiler/SKILL.md": "3058bc26b988112d8782c499429a1e362309934b9cfa08c960ec7f5b58bdb09e",
+    "skills/agentour-compiler/SKILL.md": "8cd00f0774883d78db8c61606808ea1775c5815cb983956ddde0da2d637baf71",
     "skills/agentour-compiler/references/feishu-capabilities.md": "ac161c8be22f0f864c26978a4a973522d4df7e15dda79e548bc868318868f16e",
     "skills/agentour-grill-me/SKILL.md": "4fd2ddf92db8537351f84ba12397fa7ea338d04d6cf1e73ce1ac89fa4f851b6b",
     "skills/agentour-validator/SKILL.md": "53515510fe7a7191f61d6012b9b00c2dc8f04dc2d4f70d85b00cdc47a2569b83",
