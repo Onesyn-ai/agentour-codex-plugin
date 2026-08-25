@@ -1294,6 +1294,32 @@ class PluginTests(unittest.TestCase):
         with mock.patch.object(api,"get_credentials",return_value=bundle):
             self.assertEqual(api.base_url("production"),"https://tenant-gateway.example")
 
+    def test_tenant_model_discovery_uses_only_the_gateway_authorized_subset(self):
+        api=load_api()
+        args=SimpleNamespace(platform="production")
+        authorized_subset={"data":[
+            {"id":"tenant-model-a","quality_rank":80},
+            {"id":"tenant-model-b","quality_rank":70},
+        ]}
+        with mock.patch.object(api,"request",return_value=authorized_subset) as request, \
+             mock.patch.object(api,"authenticated",side_effect=[
+                 {"ok":True,"elapsed_seconds":0.1},
+                 {"ok":True,"elapsed_seconds":0.2},
+             ]) as authenticated:
+            result=api.discover_models(args)
+        request.assert_called_once_with("production","/v1/models?modality=chat")
+        self.assertEqual([item["id"] for item in result["data"]],
+                         ["tenant-model-a","tenant-model-b"])
+        self.assertEqual(result["recommended_model"],"tenant-model-a")
+        self.assertEqual([
+            call.args[1] for call in authenticated.call_args_list
+        ],[
+            "/v1/dev/model-probe/tenant-model-a",
+            "/v1/dev/model-probe/tenant-model-b",
+        ])
+        self.assertNotIn("platform-model-outside-tenant-subset",
+                         json.dumps(result,sort_keys=True))
+
     def test_tenant_credentials_are_accepted_by_secure_store_contract(self):
         path=PLUGIN/"scripts/credential_store.py"
         spec=importlib.util.spec_from_file_location("credential_store_tenant",path)
