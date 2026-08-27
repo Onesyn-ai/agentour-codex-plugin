@@ -115,6 +115,12 @@ Validate or reauthorize immediately:
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> authorize
 ```
 
+When the user asks which account is connected, run `account` and report only its non-secret identity
+fields. When the user asks to switch accounts, run `switch-account` directly: it revokes the current
+server-side OAuth token family, removes that environment's operating-system credential, and opens a
+fresh browser authorization. Do not ask the user to run credential-store commands. Testing and
+production credentials remain independent.
+
 - Never print, pass as a command-line argument, persist in the project, commit, or include OAuth credentials in a report.
 - If validation fails, revoke the unusable local device credential and restart browser authorization.
 - Do not advance until `GET /v1/dev/me` succeeds.

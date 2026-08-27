@@ -63,11 +63,14 @@ def _verify_identity(base_url: str,access_token: str,credentials: dict,
 
 
 def _bundle(tokens: dict,identity: dict)->dict:
-    return {"credential_type":"oauth_public_client_v1","client_id":CLIENT_ID,
+    bundle={"credential_type":"oauth_public_client_v1","client_id":CLIENT_ID,
         "access_token":str(tokens["access_token"]),"refresh_token":str(tokens["refresh_token"]),
         "expires_at":float(identity["expires_at"]),"issuer":str(identity["issuer"]),
         "subject":str(identity["subject"]),"scopes":list(identity["scopes"]),
         "updated_at":time.time()}
+    for key in ("display_name","user_id"):
+        if identity.get(key):bundle[key]=str(identity[key])
+    return bundle
 
 
 def _exchange(base_url: str,payload: dict)->dict:
@@ -87,6 +90,19 @@ def refresh(platform: str,base_url: str,credentials: dict)->str:
     except (KeyError,OAuthClientError):
         delete_credentials(platform)
         raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
+
+
+def switch_account(platform: str,base_url: str)->dict:
+    credentials=get_credentials(platform)
+    if credentials.get("credential_type")=="tenant_access_token_v1":
+        raise OAuthClientError("TENANT_ACCOUNT_SWITCH_UNSUPPORTED")
+    refresh_token=str(credentials.get("refresh_token") or "")
+    if refresh_token:
+        _json_request(base_url+"/v1/oauth/revoke",
+            data=json.dumps({"token":refresh_token},separators=(",",":")).encode(),
+            headers={"Content-Type":"application/json"})
+    delete_credentials(platform)
+    return login(platform,base_url)
 
 
 def login(platform: str,base_url: str,*,timeout: float=300,

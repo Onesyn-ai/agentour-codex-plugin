@@ -30,7 +30,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from credential_store import delete_credentials,get_credentials
-from oauth_client import OAuthClientError,access_token
+from oauth_client import OAuthClientError,access_token,switch_account
 from flight_recorder import read as read_flight, record as record_flight, record_job_sample
 
 PLATFORMS = {
@@ -1089,6 +1089,22 @@ def cmd_authorize(args):
                       "developer_id": result.get("developer_id")}, ensure_ascii=False), flush=True)
 
 
+def cmd_account(args):
+    credentials=get_credentials(args.platform)
+    print(json.dumps({"platform":PLATFORMS[args.platform]["name"],
+        "authorized":credentials.get("credential_type")=="oauth_public_client_v1",
+        "display_name":str(credentials.get("display_name") or ""),
+        "subject":str(credentials.get("subject") or "")},ensure_ascii=False),flush=True)
+
+
+def cmd_switch_account(args):
+    try:identity=switch_account(args.platform,base_url(args.platform))
+    except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
+    print(json.dumps({"switched":True,"platform":PLATFORMS[args.platform]["name"],
+        "display_name":identity.get("display_name"),"subject":identity.get("subject")},
+        ensure_ascii=False),flush=True)
+
+
 def cmd_models(args):
     print(json.dumps(discover_models(args), ensure_ascii=False, indent=2), flush=True)
 
@@ -1638,6 +1654,8 @@ def main():
     bootstrap = sub.add_parser("bootstrap")
     bootstrap.add_argument("--target-platform", choices=PLATFORMS)
     sub.add_parser("authorize")
+    sub.add_parser("account")
+    sub.add_parser("switch-account")
     sub.add_parser("models")
     repositories = sub.add_parser("repositories")
     repositories.add_argument("--cursor", default="")
@@ -1826,6 +1844,10 @@ def main():
         cmd_bootstrap(args)
     elif args.command == "authorize":
         cmd_authorize(args)
+    elif args.command == "account":
+        cmd_account(args)
+    elif args.command == "switch-account":
+        cmd_switch_account(args)
     elif args.command == "models":
         cmd_models(args)
     elif args.command == "repositories":

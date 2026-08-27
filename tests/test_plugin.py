@@ -1178,6 +1178,32 @@ class PluginTests(unittest.TestCase):
             result=api.request("test","/v1/dev/me",auth=True)
         self.assertEqual(result["developer_id"],"user_demo")
 
+    def test_account_switch_revokes_old_family_before_new_browser_login(self):
+        api=load_api();oauth=sys.modules["oauth_client"]
+        credentials={"credential_type":"oauth_public_client_v1",
+                     "refresh_token":"old_refresh","subject":"old_user"}
+        calls=[]
+        with mock.patch.object(oauth,"get_credentials",return_value=credentials), \
+             mock.patch.object(oauth,"_json_request",side_effect=lambda *args,**kwargs:calls.append((args,kwargs)) or {"revoked":True}), \
+             mock.patch.object(oauth,"delete_credentials",side_effect=lambda platform:calls.append(("delete",platform))), \
+             mock.patch.object(oauth,"login",return_value={"subject":"new_user","display_name":"New User"}) as login:
+            identity=oauth.switch_account("production","https://agentour.example")
+        self.assertEqual(identity["subject"],"new_user")
+        self.assertEqual(calls[0][0][0],"https://agentour.example/v1/oauth/revoke")
+        self.assertIn(b"old_refresh",calls[0][1]["data"])
+        self.assertEqual(calls[1],("delete","production"))
+        login.assert_called_once_with("production","https://agentour.example")
+
+    def test_account_switch_keeps_local_credential_when_revocation_fails(self):
+        api=load_api();oauth=sys.modules["oauth_client"]
+        with mock.patch.object(oauth,"get_credentials",return_value={
+                "credential_type":"oauth_public_client_v1","refresh_token":"old_refresh"}), \
+             mock.patch.object(oauth,"_json_request",side_effect=oauth.OAuthClientError("OAUTH_TRANSPORT_UNAVAILABLE")), \
+             mock.patch.object(oauth,"delete_credentials") as delete:
+            with self.assertRaises(oauth.OAuthClientError):
+                oauth.switch_account("test","https://test.agentour.example")
+        delete.assert_not_called()
+
     def test_flight_recorder_persists_redacted_job_evidence(self):
         script = PLUGIN / "scripts/flight_recorder.py"
         spec = importlib.util.spec_from_file_location("agentour_flight_test", script)
