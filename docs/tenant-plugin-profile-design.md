@@ -214,7 +214,9 @@ Release 的完成证据包含 Repository、Drive Snapshot、Forge Tag/Release �
 | `codex plugin add agentour-compiler@agentour-platform` | 重装 Plugin | 保持官方来源 |
 | `api.github.com/repos/larksuite/cli/releases/latest` | Lark CLI 版本检查 | 作为第三方依赖明确披露 |
 | `npm view @larksuite/cli` / `npx` | Lark CLI 检查和安装 | 作为第三方依赖明确披露 |
-| 模型生成出的 Agent Runtime API | Agent 运行期模型调用 | 属于生成 Package，不属于 Plugin 控制面 Profile |
+| 模型生成出的 Agent Runtime API | Agent 运行期模型调用 | 由签名 Profile 的同一 `gateway_origin` 和版本化 Runtime capability 决定 |
+
+当前构建脚本仍把 `AGENTOUR_URL` 写成 `https://test.agentour.ai`。租户适配实施时必须删除这个硬编码：Compiler 只能把已验签 Profile 的 `gateway_origin`（或 Gateway contract 返回的同源 Runtime 相对路径）写入生成 Package。Runtime Token 由租户 Gateway 按固定合同签发，不能由 Skill、模型输出、Package 源码或任意环境变量改写到其他 Host。否则 Plugin 控制面完成白标后，生成的 Agent 仍会泄露或错误调用 Agentour 测试环境。
 
 官方更新源不应被租户 Gateway 接管，否则租户可向内部用户分发被篡改的 Plugin。品牌白标不等于供应链来源白标。
 
@@ -269,7 +271,8 @@ Profile URL 不是登录凭据。首次真正使用时才打开租户授权页�
     "compiler": "1.0",
     "forge": "1.0",
     "drive_agent_files": "1.0",
-    "feedback": "1.0"
+    "feedback": "1.0",
+    "runtime": "1.0"
   },
   "skill": {
     "url": "https://agentour.ai/v1/plugin-profiles/tp_xxx/skill",
