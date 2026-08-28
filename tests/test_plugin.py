@@ -640,6 +640,15 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("ak_example123456789", message)
         self.assertIn("[REDACTED]", message)
 
+    def test_git_workspace_failure_has_explicit_nonzero_exit_code(self):
+        api = load_api()
+        completed = SimpleNamespace(returncode=128, stdout="", stderr="Author identity unknown")
+        with mock.patch.object(api.subprocess, "run", return_value=completed), \
+             self.assertRaises(api.GitOperationError) as raised:
+            api._git(pathlib.Path("workspace"), "commit", "-m", "test")
+        self.assertEqual(raised.exception.code, 128)
+        self.assertIn("Author identity unknown", str(raised.exception))
+
     def test_git_clone_rejects_a_file_destination_before_credential_exchange(self):
         api = load_api()
         with tempfile.TemporaryDirectory() as td:

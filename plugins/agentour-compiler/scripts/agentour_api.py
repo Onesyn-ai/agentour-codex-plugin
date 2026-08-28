@@ -90,6 +90,17 @@ class APIResponseError(SystemExit):
         self.status = status
 
 
+class GitOperationError(SystemExit):
+    """A Git failure with an explicit non-zero process exit code."""
+
+    def __init__(self, message: str, returncode: int = 1):
+        super().__init__(returncode if returncode > 0 else 1)
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
+
+
 def redact_sensitive(value, key: str = ""):
     """Redact credential-shaped values and values stored under secret-bearing keys."""
     if _SECRET_KEY.search(key):
@@ -403,7 +414,7 @@ def run_git_with_credential(command: list[str], credential: dict, *, cwd: pathli
                                 encoding="utf-8", errors="replace", timeout=timeout, env=env)
     if result.returncode != 0:
         safe_output = redact_text(result.stdout + result.stderr, secret)[-4000:]
-        raise SystemExit(f"Git command failed: {safe_output}")
+        raise GitOperationError(f"Git command failed: {safe_output}", result.returncode)
     return result
 
 
@@ -425,7 +436,7 @@ def cmd_git_clone(args):
     if checkout.returncode != 0:
         safe_output = redact_text(checkout.stdout + checkout.stderr,
                                   str(credential["credential"]))[-4000:]
-        raise SystemExit(f"Git checkout failed: {safe_output}")
+        raise GitOperationError(f"Git checkout failed: {safe_output}", checkout.returncode)
     actual = subprocess.check_output(["git", "-C", str(destination), "rev-parse", "HEAD"],
                                      text=True, encoding="utf-8", errors="replace").strip()
     if actual.lower() != args.commit_sha.lower():
@@ -468,8 +479,9 @@ def _git(workspace: pathlib.Path, *arguments: str, check: bool = True) -> str:
     result = subprocess.run(["git", "-C", str(workspace), *arguments], text=True,
                             capture_output=True, encoding="utf-8", errors="replace")
     if check and result.returncode != 0:
-        raise SystemExit("Git workspace operation failed: " +
-                         redact_text(result.stdout + result.stderr)[-4000:])
+        raise GitOperationError(
+            "Git workspace operation failed: " +
+            redact_text(result.stdout + result.stderr)[-4000:], result.returncode)
     return result.stdout.strip()
 
 
@@ -1954,4 +1966,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except GitOperationError as exc:
+        print(str(exc), file=sys.stderr)
+        raise
