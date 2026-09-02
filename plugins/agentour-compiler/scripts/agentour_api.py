@@ -1063,6 +1063,23 @@ def poll_job(args, path: str, job_type: str, job_id: str):
         return None
 
 
+def patch_compiler_task(args, quoted_task_id: str, body: dict) -> dict:
+    path=f"/v1/dev/compiler-tasks/{quoted_task_id}"
+    patch=dict(body)
+    if patch.get("expected_revision") is None:
+        patch["expected_revision"]=authenticated(args,path).get("revision")
+    for attempt in range(4):
+        try:
+            return authenticated(args,path,method="PATCH",body=patch)
+        except APIResponseError as exc:
+            if (exc.status!=409 or "compiler task revision conflict" not in str(exc)
+                    or attempt==3):
+                raise
+            patch["expected_revision"]=authenticated(args,path).get("revision")
+            time.sleep(0.05*(attempt+1))
+    raise AssertionError("bounded Compiler Task update loop did not return")
+
+
 def sync_flight(args, task_id: str = "") -> None:
     """Best-effort mirror of recent redacted events into the durable remote Compiler Task."""
     if not task_id:
@@ -1077,10 +1094,8 @@ def sync_flight(args, task_id: str = "") -> None:
         return
     try:
         quoted = urllib.parse.quote(task_id, safe="")
-        task = authenticated(args, f"/v1/dev/compiler-tasks/{quoted}")
         flight = read_flight()
-        authenticated(args, f"/v1/dev/compiler-tasks/{quoted}", method="PATCH", body={
-            "expected_revision": task.get("revision"),
+        patch_compiler_task(args,quoted,{
             "state": {"flight_recorder": {
                 "report_schema_version": flight.get("report_schema_version", "1.0"),
                 "updated_at": flight.get("updated_at"),
@@ -1526,14 +1541,7 @@ def cmd_update_compiler_task(args):
         if value is not None:
             body[key] = value
     task_id = urllib.parse.quote(args.task_id, safe="")
-    try:
-        result = authenticated(args, f"/v1/dev/compiler-tasks/{task_id}", method="PATCH", body=body)
-    except SystemExit as exc:
-        if "API 409" not in str(exc):
-            raise
-        latest = authenticated(args, f"/v1/dev/compiler-tasks/{task_id}")
-        body["expected_revision"] = latest.get("revision")
-        result = authenticated(args, f"/v1/dev/compiler-tasks/{task_id}", method="PATCH", body=body)
+    result=patch_compiler_task(args,task_id,body)
     record_flight("compiler_task_updated", task=result, patch=body)
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
 

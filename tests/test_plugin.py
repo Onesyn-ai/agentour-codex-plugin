@@ -104,7 +104,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.6+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.7+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -1138,6 +1138,50 @@ class PluginTests(unittest.TestCase):
         create_call = call.call_args_list[0]
         self.assertEqual(create_call.args[1], "/v1/dev/compiler-tasks")
         self.assertEqual(create_call.kwargs["body"]["operation"], "update")
+
+    def test_flight_sync_retries_without_disabling_revision_control(self):
+        api = load_api()
+        args = SimpleNamespace(platform="production")
+        with mock.patch.object(api, "read_flight", return_value={
+                "report_schema_version": "1.0", "updated_at": 10, "events": []}), \
+             mock.patch.object(api, "authenticated", side_effect=[
+                 {"revision": 7}, api.APIResponseError(
+                     409, "Agentour API 409: compiler task revision conflict"),
+                 {"revision": 8}, {"revision": 9},
+             ]) as call, mock.patch.object(api.time,"sleep"):
+            api.sync_flight(args, "cmp_1")
+        self.assertEqual(len(call.call_args_list), 4)
+        patch_calls=[item for item in call.call_args_list if item.kwargs.get("method")=="PATCH"]
+        self.assertEqual(patch_calls[-1].kwargs["body"]["expected_revision"],8)
+
+    def test_compiler_task_update_retries_bounded_revision_conflicts(self):
+        api = load_api()
+        args = SimpleNamespace(
+            platform="production", task_id="cmp_1", stage="completed",
+            status="completed", package_hash=None, expected_revision=3,
+            state='{"release":"done"}', state_file=None,
+        )
+        responses = iter([
+            api.APIResponseError(409,"Agentour API 409: compiler task revision conflict"),
+            {"revision": 4},
+            api.APIResponseError(409,"Agentour API 409: compiler task revision conflict"),
+            {"revision": 5},
+            {"id": "cmp_1", "revision": 6, "status": "completed"},
+        ])
+
+        def request(*_args, **_kwargs):
+            value = next(responses)
+            if isinstance(value, BaseException):
+                raise value
+            return value
+
+        with mock.patch.object(api, "authenticated", side_effect=request) as call, \
+             mock.patch.object(api, "record_flight"), \
+             mock.patch.object(api.time, "sleep"), mock.patch("builtins.print"):
+            api.cmd_update_compiler_task(args)
+        patch_calls = [item for item in call.call_args_list if item.kwargs.get("method") == "PATCH"]
+        self.assertEqual(len(patch_calls), 3)
+        self.assertEqual(patch_calls[-1].kwargs["body"]["expected_revision"], 5)
 
     def test_template_requires_session_scoped_runtime_token(self):
         template = (PLUGIN / "templates/agent.ts").read_text(encoding="utf-8")
