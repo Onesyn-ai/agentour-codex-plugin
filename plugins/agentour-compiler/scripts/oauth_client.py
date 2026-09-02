@@ -87,7 +87,14 @@ def refresh(platform: str,base_url: str,credentials: dict)->str:
         identity=_verify_identity(base_url,str(tokens["access_token"]),credentials,expected)
         set_credentials(platform,_bundle(tokens,identity))
         return str(tokens["access_token"])
-    except (KeyError,OAuthClientError):
+    except OAuthClientError as exc:
+        # A transport failure says nothing about refresh-token validity. Keep the
+        # credential so the same account can retry after connectivity recovers.
+        if str(exc)=="OAUTH_TRANSPORT_UNAVAILABLE":
+            raise
+        delete_credentials(platform)
+        raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
+    except KeyError:
         delete_credentials(platform)
         raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
 
@@ -132,9 +139,9 @@ def login(platform: str,base_url: str,*,timeout: float=300,
         "code_challenge_method":"S256","state":state,"nonce":nonce,
         "device_name":host_platform.node() or "Codex Plugin"})
     authorization_url=base_url+"/v1/oauth/authorize?"+query
-    if not webbrowser.open(authorization_url,new=1):
-        print(json.dumps({"authorization_required":True,"authorization_url":authorization_url},
-                         ensure_ascii=False),flush=True)
+    print(json.dumps({"authorization_required":True,"authorization_url":authorization_url},
+                     ensure_ascii=False),flush=True)
+    webbrowser.open(authorization_url,new=1)
     deadline=time.monotonic()+timeout
     try:
         while not ready.is_set() and time.monotonic()<deadline:server.handle_request()

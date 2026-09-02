@@ -1213,6 +1213,16 @@ class PluginTests(unittest.TestCase):
                 oauth.switch_account("test","https://test.agentour.example")
         delete.assert_not_called()
 
+    def test_refresh_keeps_credential_when_transport_is_unavailable(self):
+        load_api();oauth=sys.modules["oauth_client"]
+        credentials={"refresh_token":"refresh","scopes":["openid"]}
+        with mock.patch.object(oauth,"_exchange",side_effect=oauth.OAuthClientError(
+                "OAUTH_TRANSPORT_UNAVAILABLE")), \
+             mock.patch.object(oauth,"delete_credentials") as delete:
+            with self.assertRaisesRegex(oauth.OAuthClientError,"OAUTH_TRANSPORT_UNAVAILABLE"):
+                oauth.refresh("production","https://agentour.example",credentials)
+        delete.assert_not_called()
+
     def test_flight_recorder_persists_redacted_job_evidence(self):
         script = PLUGIN / "scripts/flight_recorder.py"
         spec = importlib.util.spec_from_file_location("agentour_flight_test", script)
