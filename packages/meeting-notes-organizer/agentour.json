@@ -1,0 +1,31 @@
+{
+  "compiler_contract_version": 6,
+  "id": "meeting-notes-organizer",
+  "name": "会议纪要整理助手",
+  "version": "0.1.0",
+  "runtime": "eve",
+  "runtime_profile": "node-standard",
+  "runtime_requirements": {"node": ">=24", "eve": "^0.20.0", "cpu": 1, "memory_mb": 512, "disk_mb": 256, "max_processes": 4, "max_subagents": 0, "network_egress": [], "native_dependencies": [], "harness_contract": "eve-harness/0.20+agentour-e2b/1", "isolation_minimum": "isolated_agent"},
+  "execution_architecture": {"decision_version": 1, "rationale": ["单一纯文本 Agent 无需额外 Skill、工具、Hook 或 Subagent；隔离运行时满足无副作用和安全边界。"], "mechanism": "agent", "isolation_level": "isolated_agent", "runtime_profile": "node-standard", "skills": [], "tools": [], "hooks": [], "subagents": []},
+  "capabilities": ["meeting_notes"],
+  "description": "将用户提供的会议文本整理为结构化纪要和行动项。",
+  "pricing": {"model": "per_run", "amount_credits": 10},
+  "secrets": [],
+  "approval_required": [],
+  "interaction_policy": {"execution_mode": "clarify_until_ready", "dangerous_action_approval": "always"},
+  "tool_ux": {},
+  "approval_ux": {},
+  "deliverable": {"required": true, "formats": ["markdown"]},
+  "inputs": {"attachments": {"accept": [], "max_files": 0, "max_mb_each": 0, "required": false}},
+  "entry": {"module": "payload/agent/agent.ts"},
+  "examples": [
+    "产品评审：张三负责补充埋点，周五前完成。李四确认预算。",
+    "客服复盘。结论：下周更新帮助中心。风险：缺少数据。负责人：王五。"
+  ],
+  "greeting": "把会议原文发给我，我会整理纪要、决策、行动项和待确认信息。",
+  "author": {"name": "Agentour"},
+  "icon": "📝",
+  "tags": ["办公", "会议"],
+  "mcp_servers": [],
+  "runtime_ui": {"startup_message": "正在启动会议纪要整理助手", "default_working_message": "正在整理会议内容", "capabilities": {"meeting_notes": {"display_name": "会议纪要整理", "loading_message": "正在提取决策和行动项"}}}
+}

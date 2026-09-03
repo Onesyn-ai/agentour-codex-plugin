@@ -1,0 +1,6 @@
+schema_version: 1
+cases:
+  - send: "产品评审：张三负责补充埋点，周五前完成。李四确认预算。"
+    expect_contains: "行动项"
+  - send: "请整理"
+    expect_question: true
