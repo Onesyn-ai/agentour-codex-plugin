@@ -1,0 +1,21 @@
+{
+  "files": {
+    "AGENT_WIKI.md": "9f5ae63cf15f4b8ebe61d7aa108ddfa82794cb935d3b20c156f5faddd2944229",
+    "README.md": "5e474ca2ac766d90b11d04c00763230c5aec74359b97bee11598e71e4f6f7645",
+    "RELEASE.md": "130fc6d3dc28ea87bfa7a2224636ef5c69aa7ab036d7cb8e620f8f1f8ecc21bd",
+    "agentour.json": "c0f863a3ee83ffdc9e5ebba198ddd333e0bc0ac3d80b7faa7010c0ea97e985bd",
+    "package.json": "b8d077cd0b2e11edf7ca98bb93525d1bd84468539089b99bf8dd815ac4536a4d",
+    "payload/agent/agent.ts": "af0bd6986b9ab461432a128c8b20b89b607fd04994bec27f05b4cf40820515eb",
+    "payload/agent/instructions.md": "2773e6e53eb0bacb779cc60bc6c8ad4075181b67728da6b334cb0592860be3d3",
+    "payload/evals/evals.config.ts": "3b775663f64f22008abba1c1bbc830b9d6441a74c9fd42a6f3b9c8e8c12b5a8a",
+    "payload/evals/meeting-notes.eval.ts": "aa3db946065812dcbce30e4b8688e27ffedf5dbb6c8243d48ae80fd2aa4fd133",
+    "payload/package.json": "e1348dbf40415f762d8ec577dbc0f38a7f66a0ff91c433b89dee09a968e2fdac",
+    "payload/pnpm-lock.yaml": "f3af7c4ae4f07241fe0e2fc9d835bc7c326ccd2ac108d1a3776a927d5c9b86ee",
+    "payload/pnpm-workspace.yaml": "db4c7f274b2dcddac5305aecfbb4715e7421aba2d2fe30d176f7ad5f834edc7e",
+    "pnpm-lock.yaml": "c4ee8ecb4d233e037f5d1eb674d3b995a4777bcbbd96b5e4b69edfdc4fcfc6d4",
+    "tests/smoke.yaml": "4e82119a465f3800d0d9577725ae66a58dff5b6de704ed9d55a2c5ce0c414909"
+  },
+  "generated_by": "agentourcore.lockfile/1",
+  "hash": "4541067001a34ac7bfc6b3a382aa618e06a8062581deabc6690fefc5167c84bf",
+  "version": 1
+}
