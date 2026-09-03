@@ -1,6 +1,0 @@
-schema_version: 1
-cases:
-  - send: "COMPLETE_SELF_CONTAINED_INPUT"
-    expect_contains: "EXPECTED_OUTPUT"
-  - send: "INCOMPLETE_INPUT"
-    expect_question: true

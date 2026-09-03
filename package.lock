@@ -1,0 +1,20 @@
+{
+  "files": {
+    "AGENT_WIKI.md": "9f5ae63cf15f4b8ebe61d7aa108ddfa82794cb935d3b20c156f5faddd2944229",
+    "README.md": "f7859df589e02333e4ad464f56a6ea380b23f0c168c107fd3103251a04962eee",
+    "RELEASE.md": "130fc6d3dc28ea87bfa7a2224636ef5c69aa7ab036d7cb8e620f8f1f8ecc21bd",
+    "agentour.json": "5ba93277e5f69059d316090060b7bb83518b76452fcf62a59fc98daba131dbc5",
+    "package.json": "e82d4d89447f9ef7431abfade9cb203fbfc26a94e3d18f9a5df071f3bae0d07c",
+    "payload/agent/agent.ts": "af0bd6986b9ab461432a128c8b20b89b607fd04994bec27f05b4cf40820515eb",
+    "payload/agent/instructions.md": "6acfde904b902957f7e91f91dead0c6f20918cdf86e3774ba408148910938d41",
+    "payload/evals/meeting-notes.eval.ts": "866594cef79d578d935ad9b735c95f2755ebf386ac0f227f6a48e907c1e529e8",
+    "payload/package.json": "02a66dec44e5a661ddd0769e6366785a046fd6e6599666c84f45760b107d095b",
+    "payload/pnpm-lock.yaml": "f3af7c4ae4f07241fe0e2fc9d835bc7c326ccd2ac108d1a3776a927d5c9b86ee",
+    "payload/pnpm-workspace.yaml": "db4c7f274b2dcddac5305aecfbb4715e7421aba2d2fe30d176f7ad5f834edc7e",
+    "pnpm-lock.yaml": "c4ee8ecb4d233e037f5d1eb674d3b995a4777bcbbd96b5e4b69edfdc4fcfc6d4",
+    "tests/smoke.yaml": "4e82119a465f3800d0d9577725ae66a58dff5b6de704ed9d55a2c5ce0c414909"
+  },
+  "generated_by": "agentourcore.lockfile/1",
+  "hash": "3886c14eeb2927c7d2f40febc87f3c247fcf84f3497678ab80e26618467782f5",
+  "version": 1
+}

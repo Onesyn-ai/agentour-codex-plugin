@@ -1,0 +1,7 @@
+packages:
+  - .
+minimumReleaseAge: 1440
+allowBuilds:
+  '@mongodb-js/zstd': true
+  node-liblzma: true
+  esbuild: true
