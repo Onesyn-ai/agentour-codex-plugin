@@ -583,6 +583,10 @@ def cmd_agent_source_prepare(args):
                      str(metadata.get("repository_id")) != repository_id):
         raise SystemExit("Local Agent/Repository binding conflicts with the resolved Repository")
     git_dir = workspace / ".git"
+    if not git_dir.exists() and (workspace / "agentour.json").is_file():
+        raise SystemExit(
+            "Source workspace must be a Git repository root; pass the parent workspace and --path Package"
+        )
     if not git_dir.exists():
         if any(item.name != ".agentour" for item in workspace.iterdir()):
             _git(workspace, "init", "-b", default_branch)
