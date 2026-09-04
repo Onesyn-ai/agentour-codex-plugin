@@ -205,6 +205,13 @@ Never infer a Repository from the directory name. A dirty local workspace is pre
 the explicit `--use-local` choice; it must never be reset. Fast-forward a clean workspace only when
 the fetched Commit proves ancestry. If local and remote diverge, stop for merge, rebase, or a new
 branch. A locally-ahead Commit remains local authority and must not be discarded.
+Before any `repository-create`, `agent-source-push`, Change Set, Source Revision, or Release write,
+the Plugin must verify that the Agent registry record, Repository binding, effective policy, required
+capabilities, and selected production transport are present and compatible. Never call
+`repository-create` directly for a new Agent while skipping `agent-source-prepare`; Prepare is the
+Agent binding gate and must complete in a dedicated Git workspace. A workspace that is itself a
+Package directory must fail locally before it can create nested Git metadata.
+
 After Package validation, use `agent-source-push` with exactly one explicit workspace-relative Package
 directory. It refuses pre-existing staged changes, snapshots only that Package, maps its bytes to the
 managed Repository root, and verifies the Commit tree exactly matches the Package file list. Compiler
@@ -224,7 +231,9 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   --release-notes <text> --visibility <private|public>
 ```
 
-This single operation merges the reviewed change, freezes the Drive Collection snapshot, creates the
+After a Pull Request is merged, the release source ref is the Repository canonical default branch
+(`main`) and the source commit must be the returned merge commit; normalize this automatically and
+include the normalized ref in the idempotency key. This single operation merges the reviewed change, freezes the Drive Collection snapshot, creates the
 immutable Tag and Forge Release, and records the Core Agent Version. Retry the same inputs with the same
 derived operation ID; never create a Tag, Forge Release, or platform version directly from the Plugin.
 For a tenant credential, `public` means visible inside that tenant only. It never requests global

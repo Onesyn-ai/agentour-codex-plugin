@@ -543,14 +543,20 @@ class PluginTests(unittest.TestCase):
             workspace = pathlib.Path(td)
             subprocess.run(["git", "-C", str(workspace), "init", "-b", "main"], check=True,
                            capture_output=True, text=True)
-            subprocess.run(["git", "-C", str(workspace), "config", "user.name", "Plugin Test"],
+            # The initial baseline represents the Forge-created Repository. The
+            # managed projection must establish its own local author identity.
+            subprocess.run(["git", "-C", str(workspace), "config", "user.name", "Bootstrap"],
                            check=True)
             subprocess.run(["git", "-C", str(workspace), "config", "user.email",
-                            "plugin-test@example.invalid"], check=True)
+                            "bootstrap@example.invalid"], check=True)
             (workspace / "README.md").write_text("initial\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(workspace), "add", "README.md"], check=True)
             subprocess.run(["git", "-C", str(workspace), "commit", "-m", "initial"], check=True,
                            capture_output=True, text=True)
+            subprocess.run(["git", "-C", str(workspace), "config", "--unset", "user.name"],
+                           check=True)
+            subprocess.run(["git", "-C", str(workspace), "config", "--unset", "user.email"],
+                           check=True)
             api._write_source_metadata(workspace, agent_id="agt_1",
                                        repository_id="repo_1", default_branch="main")
             package = workspace / "packages" / "agt_1"
@@ -575,6 +581,10 @@ class PluginTests(unittest.TestCase):
                  mock.patch.object(api, "run_git_with_credential") as push, \
                  mock.patch.object(api, "record_flight"):
                 api.cmd_agent_source_push(args)
+            self.assertEqual(api._git(workspace, "config", "--local", "user.name"),
+                             "Agentour Publisher")
+            self.assertEqual(api._git(workspace, "config", "--local", "user.email"),
+                             "publisher@agentour.local")
             commit = subprocess.run(["git", "-C", str(workspace), "rev-parse", "HEAD"],
                                     check=True, capture_output=True, text=True).stdout.strip()
             tree_paths = subprocess.run(
@@ -1109,7 +1119,7 @@ class PluginTests(unittest.TestCase):
             pull_request_number=7, required_approvals=1, release_notes="Ready",
         )
         operation = api.stable_idempotency_key(
-            "agent-release", "agt_1", "1.2.3", "src_1", commit)
+            "agent-release", "agt_1", "1.2.3", "src_1", commit, "main", "7")
         response = {
             "id": "rel_1", "operation_id": operation, "agent_id": "agt_1",
             "version": "1.2.3", "state": "completed", "repository_id": "repo_1",
@@ -1231,6 +1241,20 @@ class PluginTests(unittest.TestCase):
             result=api.request("test","/v1/dev/me",auth=True)
         self.assertEqual(result["developer_id"],"user_demo")
 
+    def test_api_401_does_not_unconditionally_delete_rotated_credentials(self):
+        api=load_api()
+        failure=api.urllib.error.HTTPError(
+            "https://agentour.example/v1/dev/me",401,"unauthorized",{},
+            __import__("io").BytesIO(b'{"error_code":"TOKEN_EXPIRED"}'))
+        with mock.patch.object(api,"access_token",return_value="stale_access"), \
+             mock.patch.object(api,"base_url",return_value="https://agentour.example"), \
+             mock.patch.object(api.urllib.request,"urlopen",side_effect=failure), \
+             mock.patch.object(api,"delete_credentials_if_matches") as conditional_delete:
+            with self.assertRaises(api.APIResponseError):
+                api.request("production","/v1/dev/me",auth=True)
+        conditional_delete.assert_called_once_with(
+            "production",access_token="stale_access")
+
     def test_account_switch_revokes_old_family_before_new_browser_login(self):
         api=load_api();oauth=sys.modules["oauth_client"]
         credentials={"credential_type":"oauth_public_client_v1",
@@ -1262,9 +1286,36 @@ class PluginTests(unittest.TestCase):
         credentials={"refresh_token":"refresh","scopes":["openid"]}
         with mock.patch.object(oauth,"_exchange",side_effect=oauth.OAuthClientError(
                 "OAUTH_TRANSPORT_UNAVAILABLE")), \
+             mock.patch.object(oauth,"get_credentials",return_value={}), \
              mock.patch.object(oauth,"delete_credentials") as delete:
             with self.assertRaisesRegex(oauth.OAuthClientError,"OAUTH_TRANSPORT_UNAVAILABLE"):
                 oauth.refresh("production","https://agentour.example",credentials)
+        delete.assert_not_called()
+
+    def test_refresh_reuses_credentials_rotated_by_another_process(self):
+        load_api();oauth=sys.modules["oauth_client"]
+        stale={"credential_type":"oauth_public_client_v1","refresh_token":"old_refresh",
+               "access_token":"old_access","expires_at":0,"scopes":["openid"]}
+        rotated={**stale,"refresh_token":"new_refresh","access_token":"new_access",
+                 "expires_at":9999999999}
+        with mock.patch.object(oauth,"get_credentials",return_value=rotated), \
+             mock.patch.object(oauth,"_exchange") as exchange:
+            self.assertEqual(oauth.refresh(
+                "production","https://agentour.example",stale),"new_access")
+        exchange.assert_not_called()
+
+    def test_failed_refresh_does_not_delete_newer_credentials(self):
+        load_api();oauth=sys.modules["oauth_client"]
+        stale={"credential_type":"oauth_public_client_v1","refresh_token":"old_refresh",
+               "access_token":"old_access","expires_at":0,"scopes":["openid"]}
+        newer={**stale,"refresh_token":"new_refresh","access_token":"new_access"}
+        with mock.patch.object(oauth,"get_credentials",side_effect=[stale,newer]), \
+             mock.patch.object(oauth,"_exchange",side_effect=oauth.OAuthClientError(
+                 "OAUTH_REFRESH_TOKEN_REPLAYED")), \
+             mock.patch.object(oauth,"delete_credentials") as delete:
+            with self.assertRaisesRegex(oauth.OAuthClientError,
+                                        "OAUTH_REAUTHORIZATION_REQUIRED"):
+                oauth.refresh("production","https://agentour.example",stale)
         delete.assert_not_called()
 
     def test_flight_recorder_persists_redacted_job_evidence(self):
@@ -1381,6 +1432,41 @@ class PluginTests(unittest.TestCase):
                 "AGENTOUR_OAUTH_BUNDLE_PRODUCTION":bundle("prod-user")}, clear=False):
             self.assertEqual(module.get_credentials("test")["subject"],"test-user")
             self.assertEqual(module.get_credentials("production")["subject"],"prod-user")
+
+    def test_credential_lock_serializes_separate_processes(self):
+        marker=__import__("uuid").uuid4().hex
+        script=(
+            "import pathlib,sys,time;"
+            f"sys.path.insert(0,{str(PLUGIN / 'scripts')!r});"
+            "import credential_store as store;"
+            f"store.SERVICE='agentour-lock-test-{marker}';"
+            "start=time.monotonic();"
+            "\nwith store.credential_lock('test',timeout=5):\n"
+            " print(time.monotonic()-start,flush=True);time.sleep(0.35)"
+        )
+        first=subprocess.Popen([sys.executable,"-c",script],stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,text=True)
+        second=subprocess.Popen([sys.executable,"-c",script],stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,text=True)
+        first_out,first_err=first.communicate(timeout=10)
+        second_out,second_err=second.communicate(timeout=10)
+        self.assertEqual((first.returncode,second.returncode),(0,0),
+                         first_err+second_err)
+        waits=sorted([float(first_out.strip()),float(second_out.strip())])
+        self.assertLess(waits[0],0.2)
+        self.assertGreater(waits[1],0.25)
+
+    def test_conditional_delete_preserves_a_newer_credential_generation(self):
+        path=PLUGIN/"scripts/credential_store.py"
+        spec=importlib.util.spec_from_file_location("credential_store_conditional",path)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        current={"access_token":"new_access","refresh_token":"new_refresh"}
+        with mock.patch.object(module,"get_credentials",return_value=current), \
+             mock.patch.object(module,"delete_credentials") as delete:
+            removed=module.delete_credentials_if_matches(
+                "production",access_token="old_access")
+        self.assertFalse(removed)
+        delete.assert_not_called()
 
     def test_tenant_credentials_select_the_bound_api_without_platform_oauth(self):
         api=load_api()

@@ -29,7 +29,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from credential_store import delete_credentials,get_credentials
+from credential_store import delete_credentials_if_matches,get_credentials
 from oauth_client import OAuthClientError,access_token,switch_account
 from flight_recorder import read as read_flight, record as record_flight, record_job_sample
 
@@ -180,7 +180,8 @@ def request(platform: str, path: str, *, method: str = "GET",
             if exc.code in {502, 503, 504} and attempt + 1 < attempts:
                 time.sleep(0.5 * (2 ** attempt))
                 continue
-            if auth and exc.code==401:delete_credentials(platform)
+            if auth and exc.code==401:
+                delete_credentials_if_matches(platform,access_token=token)
             raise APIResponseError(exc.code, format_api_error(exc.code, detail)) from exc
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             if attempt + 1 < attempts:
@@ -583,6 +584,10 @@ def cmd_agent_source_prepare(args):
                      str(metadata.get("repository_id")) != repository_id):
         raise SystemExit("Local Agent/Repository binding conflicts with the resolved Repository")
     git_dir = workspace / ".git"
+    if not git_dir.exists() and (workspace / "agentour.json").is_file():
+        raise SystemExit(
+            "Source workspace must be a Git repository root; pass the parent workspace and --path Package"
+        )
     if not git_dir.exists():
         if any(item.name != ".agentour" for item in workspace.iterdir()):
             _git(workspace, "init", "-b", default_branch)
@@ -615,6 +620,11 @@ def cmd_agent_source_prepare(args):
                 raise SystemExit("Local and remote source diverged; choose merge, rebase, or a new branch")
         elif not local_commit:
             _git(workspace, "checkout", "--detach", remote_commit)
+    # Managed source commits must not depend on, or mutate, the user's global Git
+    # identity.  Configure a repository-local service identity for fresh and
+    # previously prepared workspaces alike.
+    _git(workspace, "config", "--local", "user.name", "Agentour Publisher")
+    _git(workspace, "config", "--local", "user.email", "publisher@agentour.local")
     _write_source_metadata(workspace, agent_id=args.agent_id,
                            repository_id=repository_id, default_branch=default_branch)
     commit = _git(workspace, "rev-parse", "HEAD", check=False)
@@ -630,6 +640,8 @@ def cmd_agent_source_push(args):
     workspace = pathlib.Path(args.workspace).expanduser().resolve()
     if not (workspace / ".git").exists():
         raise SystemExit("Agent source workspace is not a Git repository")
+    _git(workspace, "config", "--local", "user.name", "Agentour Publisher")
+    _git(workspace, "config", "--local", "user.email", "publisher@agentour.local")
     metadata = _read_source_metadata(workspace)
     if (str(metadata.get("agent_id") or "") != args.agent_id or
             str(metadata.get("repository_id") or "") != args.repository_id):
@@ -916,14 +928,17 @@ def cmd_source_eval_status(args):
 
 def cmd_agent_release(args):
     """Run the one authoritative Core/Forge/Drive Agent release transaction."""
+    # A merged PR's immutable source is the repository main commit; using the
+    # feature ref here causes Core to report source_commit drift.
+    source_ref = "main" if args.pull_request_number else args.source_ref
     operation = stable_idempotency_key(
         "agent-release", args.agent_id, args.version, args.source_revision_id,
-        args.source_commit_sha,
+        args.source_commit_sha, source_ref, str(args.pull_request_number or ""),
     )
     body = {
         "operation_id": operation,
         "version": args.version,
-        "source_ref": args.source_ref,
+        "source_ref": source_ref,
         "source_revision_id": args.source_revision_id,
         "source_commit_sha": args.source_commit_sha,
         "pull_request_number": args.pull_request_number,

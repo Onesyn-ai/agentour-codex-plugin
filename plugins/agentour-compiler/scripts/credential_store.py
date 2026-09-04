@@ -4,16 +4,20 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 
 SERVICE = "agentour-compiler"
 PLATFORMS = {"test", "production"}
 WINDOWS_BACKEND = "windows-credential-manager"
+LOCK_TIMEOUT_SECONDS = 180.0
 
 
 class CredentialStoreError(RuntimeError):
@@ -35,6 +39,50 @@ def _check(platform: str) -> str:
 
 def _env_name(platform: str) -> str:
     return f"AGENTOUR_OAUTH_BUNDLE_{platform.upper()}"
+
+
+def _lock_path(platform: str) -> Path:
+    root = Path(tempfile.gettempdir()) / SERVICE / "credential-locks"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return root / f"{_check(platform)}.lock"
+
+
+@contextmanager
+def credential_lock(platform: str, *, timeout: float = LOCK_TIMEOUT_SECONDS):
+    """Serialize credential rotation across Plugin processes for one platform."""
+    handle = _lock_path(platform).open("a+b")
+    if handle.tell() == 0:
+        handle.write(b"0")
+        handle.flush()
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while not acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except (BlockingIOError, OSError):
+                if time.monotonic() >= deadline:
+                    raise CredentialStoreError(
+                        "CREDENTIAL_STORE_LOCK_TIMEOUT", "lock", "Timeout")
+                time.sleep(0.05)
+        yield
+    finally:
+        if acquired:
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _is_wsl() -> bool:
@@ -220,6 +268,21 @@ def delete_credentials(platform: str) -> None:
         subprocess.run(["security", "delete-generic-password", "-s", SERVICE, "-a", account], capture_output=True)
     elif backend == "linux-secret-service":
         subprocess.run(["secret-tool", "clear", "service", SERVICE, "account", account], capture_output=True)
+
+
+def delete_credentials_if_matches(platform: str, *, access_token: str = "",
+                                  refresh_token: str = "") -> bool:
+    """Delete only the credential generation observed by the failed caller."""
+    if not access_token and not refresh_token:
+        raise ValueError("a credential generation marker is required")
+    with credential_lock(platform):
+        current = get_credentials(platform)
+        matches = ((not access_token or current.get("access_token") == access_token) and
+                   (not refresh_token or current.get("refresh_token") == refresh_token))
+        if not current or not matches:
+            return False
+        delete_credentials(platform)
+        return True
 
 
 def storage_status(platform: str) -> dict:

@@ -76,6 +76,9 @@ owned canonical-name match exists, and persists only the immutable Agent/Reposit
 local binding wins, followed by the latest default branch. Clean workspaces may fast-forward. Dirty,
 locally-ahead, and diverged workspaces are preserved and require an explicit safe resolution.
 `agent-source-push` accepts exactly one explicit `--path` pointing to a validated Package directory.
+The Package directory must be inside the prepared Source workspace (for example `package/`); copy the
+validated Package there and pass that workspace-relative path. It must not be the Source workspace root
+or an external Compiler workspace.
 It snapshots that Package, clears only the Git index, and projects the Package bytes to Repository
 root, so `agentour.json` is always at root. The resulting Commit tree must exactly equal the Package
 file list: legacy `packages/<agent-id>/...`, `.agentour`, Compiler specs, flight records, and unrelated

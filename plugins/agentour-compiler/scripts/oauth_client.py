@@ -15,11 +15,12 @@ import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler,HTTPServer
 
-from credential_store import delete_credentials,get_credentials,set_credentials
+from credential_store import credential_lock,delete_credentials,get_credentials,set_credentials
 
 CLIENT_ID="agentour-codex-plugin"
 BASE_SCOPES=("openid","profile","offline_access","agent:read","agent:write",
-             "repository:read","repository:write","drive:file:read","drive:file:write")
+             "repository:read","repository:write","repository:release",
+             "drive:file:read","drive:file:write","agent:publish")
 
 
 class OAuthClientError(RuntimeError):
@@ -80,35 +81,47 @@ def _exchange(base_url: str,payload: dict)->dict:
 
 
 def refresh(platform: str,base_url: str,credentials: dict)->str:
-    try:
-        tokens=_exchange(base_url,{"grant_type":"refresh_token","client_id":CLIENT_ID,
-                                   "refresh_token":credentials["refresh_token"]})
-        expected=set(credentials.get("scopes") or BASE_SCOPES)
-        identity=_verify_identity(base_url,str(tokens["access_token"]),credentials,expected)
-        set_credentials(platform,_bundle(tokens,identity))
-        return str(tokens["access_token"])
-    except OAuthClientError as exc:
-        # A transport failure says nothing about refresh-token validity. Keep the
-        # credential so the same account can retry after connectivity recovers.
-        if str(exc)=="OAUTH_TRANSPORT_UNAVAILABLE":
-            raise
-        delete_credentials(platform)
-        raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
-    except KeyError:
-        delete_credentials(platform)
-        raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
+    with credential_lock(platform):
+        current=get_credentials(platform)
+        attempted=current if current.get("credential_type")=="oauth_public_client_v1" else credentials
+        # Another process may have rotated the family while this process waited.
+        if (current and current.get("refresh_token")!=credentials.get("refresh_token") and
+                float(current.get("expires_at") or 0)>time.time()+60):
+            return str(current["access_token"])
+        try:
+            tokens=_exchange(base_url,{"grant_type":"refresh_token","client_id":CLIENT_ID,
+                                       "refresh_token":attempted["refresh_token"]})
+            expected=set(attempted.get("scopes") or BASE_SCOPES)
+            identity=_verify_identity(base_url,str(tokens["access_token"]),attempted,expected)
+            set_credentials(platform,_bundle(tokens,identity))
+            return str(tokens["access_token"])
+        except OAuthClientError as exc:
+            # A transport failure says nothing about refresh-token validity. Keep the
+            # credential so the same account can retry after connectivity recovers.
+            if str(exc)=="OAUTH_TRANSPORT_UNAVAILABLE":
+                raise
+            latest=get_credentials(platform)
+            if latest.get("refresh_token")==attempted.get("refresh_token"):
+                delete_credentials(platform)
+            raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
+        except KeyError:
+            latest=get_credentials(platform)
+            if latest.get("refresh_token")==attempted.get("refresh_token"):
+                delete_credentials(platform)
+            raise OAuthClientError("OAUTH_REAUTHORIZATION_REQUIRED")
 
 
 def switch_account(platform: str,base_url: str)->dict:
-    credentials=get_credentials(platform)
-    if credentials.get("credential_type")=="tenant_access_token_v1":
-        raise OAuthClientError("TENANT_ACCOUNT_SWITCH_UNSUPPORTED")
-    refresh_token=str(credentials.get("refresh_token") or "")
-    if refresh_token:
-        _json_request(base_url+"/v1/oauth/revoke",
-            data=json.dumps({"token":refresh_token},separators=(",",":")).encode(),
-            headers={"Content-Type":"application/json"})
-    delete_credentials(platform)
+    with credential_lock(platform):
+        credentials=get_credentials(platform)
+        if credentials.get("credential_type")=="tenant_access_token_v1":
+            raise OAuthClientError("TENANT_ACCOUNT_SWITCH_UNSUPPORTED")
+        refresh_token=str(credentials.get("refresh_token") or "")
+        if refresh_token:
+            _json_request(base_url+"/v1/oauth/revoke",
+                data=json.dumps({"token":refresh_token},separators=(",",":")).encode(),
+                headers={"Content-Type":"application/json"})
+        delete_credentials(platform)
     return login(platform,base_url)
 
 
@@ -154,10 +167,11 @@ def login(platform: str,base_url: str,*,timeout: float=300,
     tokens=_exchange(base_url,{"grant_type":"authorization_code","client_id":CLIENT_ID,
         "code":code,"redirect_uri":callback,"code_verifier":verifier})
     if tokens.get("nonce")!=nonce:raise OAuthClientError("OAUTH_NONCE_INVALID")
-    previous=get_credentials(platform)
-    identity=_verify_identity(base_url,str(tokens.get("access_token") or ""),previous,
-                              set(requested_scopes))
-    credentials=_bundle(tokens,identity);set_credentials(platform,credentials)
+    with credential_lock(platform):
+        previous=get_credentials(platform)
+        identity=_verify_identity(base_url,str(tokens.get("access_token") or ""),previous,
+                                  set(requested_scopes))
+        credentials=_bundle(tokens,identity);set_credentials(platform,credentials)
     return {key:value for key,value in identity.items() if key not in {"access_token","refresh_token"}}
 
 
