@@ -388,7 +388,7 @@ credentials during module import/build, pin every direct dependency to an exact 
 `package.json#pnpm.overrides`, and copy the audited `templates/pnpm-workspace.yaml` so native Eve
 dependencies use the remote Build's exact `allowBuilds` policy.
 
-Preserve source business rules, orchestration, tool contracts, approvals, attachment behavior, output schemas, artefacts, retry behavior, and user-visible flow. Every capability needs business-readable `runtime_ui` labels. Never expose `load skill`, internal paths, or system prompts. `waiting_approval` means paused and waiting, never running.
+Preserve source business rules, orchestration, tool contracts, approvals, attachment behavior, output schemas, artefacts, retry behavior, and user-visible flow. Every capability needs business-readable `runtime_ui` labels. Never expose `load skill`, internal paths, or system prompts. `waiting_approval` means paused and waiting, never running. A non-terminal run must never emit a formal deliverable or end automatically. Approval denial rejects only that operation: the Agent must reassess whether another step, revision, or user input can continue the task. It may finish only when denial leaves no valid continuation, and that terminal denial must still produce an accurate deliverable stating what was not executed.
 
 Before generating files, turn the approved spec into an explicit acceptance contract. Every Package
 must declare `deliverable.required=true`, at least one `deliverable.formats` value, and at least two

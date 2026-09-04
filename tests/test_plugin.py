@@ -70,6 +70,7 @@ class PluginTests(unittest.TestCase):
             "payload/pnpm-workspace.yaml": "packages:\n  - '.'\nminimumReleaseAge: 1440\nallowBuilds: {}\n",
             "payload/agent/agent.ts": "const url = process.env.AGENTOUR_URL;\n",
             "payload/agent/instructions.md": (
+                "尚未完成或等待审批时不得输出正式交付物。成功、拒绝、取消或失败形成最终终局时必须交付准确结果。\n"
                 "# Demo\n缺少信息时调用 ask_question，使会话进入 input_requested。"
                 "用户补充后重新检查剩余缺口，继续询问下一项；缺信息时不得标记完成或输出最终交付物。"
                 "只有任务成功、无法继续的明确失败或用户明确取消才能结束。"
@@ -503,6 +504,31 @@ class PluginTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaises(SystemExit):
                 api._read_source_metadata(workspace)
+
+    def test_agent_source_repository_name_is_derived_from_agent_id(self):
+        api = load_api()
+        args = SimpleNamespace(platform="production", repository_id="",
+                               agent_id="contract-key-points-extractor", name="合同要点提取助手",
+                               default_branch="main")
+        with mock.patch.object(api, "authenticated", side_effect=[
+                {"items": []}, {"repository_id": "repo_1"}]) as request:
+            result = api._repository_for_source(args)
+        self.assertEqual(result, {"repository_id": "repo_1"})
+        create = request.call_args_list[1]
+        self.assertEqual(create.kwargs["body"]["canonical_name"],
+                         "contract-key-points-extractor")
+
+    def test_source_workspace_dirty_ignores_only_agentour_managed_metadata(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as td:
+            workspace = pathlib.Path(td)
+            subprocess.run(["git", "-C", str(workspace), "init"], check=True,
+                           capture_output=True, text=True)
+            api._write_source_metadata(workspace, agent_id="agt_1",
+                                       repository_id="repo_1", default_branch="main")
+            self.assertFalse(api._source_workspace_dirty(workspace))
+            (workspace / "user-change.txt").write_text("keep me", encoding="utf-8")
+            self.assertTrue(api._source_workspace_dirty(workspace))
 
     def test_agent_collection_binding_is_established_before_source_release(self):
         api = load_api()
@@ -1051,6 +1077,8 @@ class PluginTests(unittest.TestCase):
                 "完全无法解析执行目标时诚实失败，不得编造。一次形成完整执行计划，Skill 和 Schema "
                 "只加载一次并复用；同类操作批量执行，禁止每条记录单独触发模型。使用幂等键支持中断恢复。"
                 "工具失败时不得声称成功，并说明下一步。\n",encoding="utf-8")
+            with (package/"payload/agent/instructions.md").open("a", encoding="utf-8") as file:
+                file.write("尚未完成时不得输出正式交付物；成功、拒绝、取消或失败形成最终终局时必须交付准确结果。\n")
             result=subprocess.run([sys.executable,str(PLUGIN/"scripts/validate_package.py"),str(package)],
                 capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
@@ -1241,19 +1269,26 @@ class PluginTests(unittest.TestCase):
             result=api.request("test","/v1/dev/me",auth=True)
         self.assertEqual(result["developer_id"],"user_demo")
 
-    def test_api_401_does_not_unconditionally_delete_rotated_credentials(self):
+    def test_api_401_refreshes_oauth_before_deleting_credentials(self):
         api=load_api()
         failure=api.urllib.error.HTTPError(
             "https://agentour.example/v1/dev/me",401,"unauthorized",{},
             __import__("io").BytesIO(b'{"error_code":"TOKEN_EXPIRED"}'))
+        response=mock.MagicMock()
+        response.__enter__.return_value.read.return_value=b'{"developer_id":"user_demo"}'
+        credentials={"credential_type":"oauth_public_client_v1",
+                     "access_token":"stale_access","refresh_token":"refresh_1"}
         with mock.patch.object(api,"access_token",return_value="stale_access"), \
              mock.patch.object(api,"base_url",return_value="https://agentour.example"), \
-             mock.patch.object(api.urllib.request,"urlopen",side_effect=failure), \
+             mock.patch.object(api,"get_credentials",return_value=credentials), \
+             mock.patch.object(api,"refresh",return_value="fresh_access") as refresh_token, \
+             mock.patch.object(api.urllib.request,"urlopen",side_effect=[failure,response]), \
              mock.patch.object(api,"delete_credentials_if_matches") as conditional_delete:
-            with self.assertRaises(api.APIResponseError):
-                api.request("production","/v1/dev/me",auth=True)
-        conditional_delete.assert_called_once_with(
-            "production",access_token="stale_access")
+            result=api.request("production","/v1/dev/me",auth=True)
+        self.assertEqual(result,{"developer_id":"user_demo"})
+        refresh_token.assert_called_once_with(
+            "production","https://agentour.example",credentials)
+        conditional_delete.assert_not_called()
 
     def test_idempotency_key_enables_bounded_post_transport_retry(self):
         api=load_api()

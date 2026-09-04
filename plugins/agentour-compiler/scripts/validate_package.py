@@ -241,6 +241,12 @@ def main() -> int:
             critical.append("pnpm-workspace.yaml allowBuilds is missing: " + ", ".join(missing_native or native))
 
     runtime_ui = manifest.get("runtime_ui") or {}; ui_caps = runtime_ui.get("capabilities") or {}
+    evals_dir = root / "payload/evals"
+    if evals_dir.is_dir():
+        eval_config = evals_dir / "evals.config.ts"
+        config_source = eval_config.read_text(encoding="utf-8", errors="replace") if eval_config.is_file() else ""
+        if "export default defineEvalConfig(" not in config_source:
+            critical.append("payload/evals/evals.config.ts must default-export defineEvalConfig()")
     for capability in manifest.get("capabilities") or []:
         item = ui_caps.get(capability)
         if not isinstance(item, dict): critical.append(f"Missing runtime_ui for capability: {capability}"); continue
@@ -259,9 +265,13 @@ def main() -> int:
         if tools_dir.is_dir():
             for tool_file in sorted(tools_dir.glob("*.ts")):
                 name = tool_file.stem
-                zh_name = str((tool_ux.get(name) or {}).get("zh_name", ""))
-                if not re.search(r"[\u4e00-\u9fff]", zh_name):
-                    critical.append(f"tool_ux.{name}.zh_name must contain a business-readable Chinese name")
+                ux = (tool_ux.get(name) or {}) if isinstance(tool_ux, dict) else {}
+                required_ux = (("zh_name", "loading_message", "success_message", "failure_message")
+                               if int(manifest.get("compiler_contract_version", 0) or 0) >= 5
+                               else ("zh_name",))
+                for field in required_ux:
+                    if not re.search(r"[\u4e00-\u9fff]", str(ux.get(field, ""))):
+                        critical.append(f"tool_ux.{name}.{field} must contain business-readable Chinese text")
         approval_ux = manifest.get("approval_ux") or {}
         approval_fields = {"title", "purpose", "action", "impact", "risk", "deny_effect"}
         for tool in manifest.get("approval_required") or []:
@@ -269,6 +279,10 @@ def main() -> int:
             missing_fields = sorted(approval_fields - set(contract or {}))
             if missing_fields:
                 critical.append(f"approval_ux.{tool} missing fields: {', '.join(missing_fields)}")
+            source = (tools_dir / f"{tool}.ts").read_text(encoding="utf-8", errors="replace")
+            for field in ("approval_summary", "approval_impact"):
+                if field not in source:
+                    critical.append(f"approval tool {tool} must accept {field}")
         deliverable = manifest.get("deliverable") or {}
         if deliverable.get("required") is not True:
             critical.append("deliverable.required must be true")
@@ -374,6 +388,19 @@ def main() -> int:
         critical.append("instructions.md must define honest tool-failure and fallback-delivery behavior")
     if manifest.get("approval_required") and "审批" not in content and "approval" not in content.lower():
         critical.append("Approval is declared but instructions do not explain it")
+    terminal_contract = {
+        "no deliverable before terminal outcome":
+            r"(?:未形成终局|尚未完成|等待补充|等待审批).{0,80}(?:不得|不能).{0,30}(?:正式交付物|最终交付物|final deliverable)",
+        "terminal outcomes still produce a deliverable":
+            r"(?:成功|拒绝|取消|失败).{0,100}(?:终局|最终).{0,40}(?:交付|结果)",
+    }
+    for label, pattern in terminal_contract.items():
+        if not re.search(pattern, content, re.I | re.S):
+            critical.append(f"instructions.md missing terminal-deliverable rule: {label}")
+    if manifest.get("approval_required") and not re.search(
+            r"(?:审批拒绝|approval denial|approval denied).{0,100}"
+            r"(?:重新判断|继续任务|等待输入|终局|reassess|continue|terminal)", content, re.I | re.S):
+        critical.append("instructions.md must reassess continuation after approval denial")
     if re.search(r"等待审批.{0,20}(正在执行|运行中|思考中)", content):
         critical.append("Waiting for approval is incorrectly described as running")
 

@@ -30,7 +30,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from credential_store import delete_credentials_if_matches,get_credentials
-from oauth_client import OAuthClientError,access_token,switch_account
+from oauth_client import OAuthClientError,access_token,refresh,switch_account
 from flight_recorder import read as read_flight, record as record_flight, record_job_sample
 
 PLATFORMS = {
@@ -169,7 +169,10 @@ def request(platform: str, path: str, *, method: str = "GET",
         headers["Authorization"] = f"Bearer {token}"
     idempotent_write = bool(headers.get("Idempotency-Key"))
     attempts = 4 if method in {"GET", "HEAD"} or idempotent_write else 1
-    for attempt in range(attempts):
+    refreshed_after_401 = False
+    # Authentication gets one separate retry budget for a refresh-token rotation.
+    # Transport/server retries remain capped by ``attempts`` below.
+    for attempt in range(attempts + (1 if auth else 0)):
         req = urllib.request.Request(base_url(platform) + path, data=data,
                                      headers=headers, method=method)
         try:
@@ -181,8 +184,19 @@ def request(platform: str, path: str, *, method: str = "GET",
             if exc.code in {502, 503, 504} and attempt + 1 < attempts:
                 time.sleep(0.5 * (2 ** attempt))
                 continue
-            if auth and exc.code==401:
-                delete_credentials_if_matches(platform,access_token=token)
+            if auth and exc.code == 401 and not refreshed_after_401:
+                credentials = get_credentials(platform)
+                if (credentials.get("credential_type") == "oauth_public_client_v1" and
+                        credentials.get("access_token") == token):
+                    try:
+                        token = refresh(platform, base_url(platform), credentials)
+                    except OAuthClientError as refresh_exc:
+                        raise SystemExit(str(refresh_exc)) from refresh_exc
+                    headers["Authorization"] = f"Bearer {token}"
+                    refreshed_after_401 = True
+                    continue
+            if auth and exc.code == 401:
+                delete_credentials_if_matches(platform, access_token=token)
             raise APIResponseError(exc.code, format_api_error(exc.code, detail)) from exc
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             if attempt + 1 < attempts:
@@ -501,6 +515,13 @@ def _source_metadata_path(workspace: pathlib.Path) -> pathlib.Path:
     return workspace / ".agentour" / "source.json"
 
 
+def _source_workspace_dirty(workspace: pathlib.Path) -> bool:
+    """Report user changes while ignoring metadata managed by this command."""
+    return bool(_git(
+        workspace, "status", "--porcelain", "--", ".", ":(exclude).agentour",
+    ))
+
+
 def _read_source_metadata(workspace: pathlib.Path) -> dict:
     path = _source_metadata_path(workspace)
     if not path.is_file():
@@ -534,17 +555,18 @@ def _repository_for_source(args) -> dict:
         return result
     query = urllib.parse.urlencode({"limit": 200})
     listed = authenticated(args, f"/v1/forge/repositories?{query}")
+    canonical_name = args.agent_id
     matches = [item for item in (listed.get("items") or [])
-               if str(item.get("canonical_name") or item.get("name") or "") == args.name]
+               if str(item.get("canonical_name") or item.get("name") or "") == canonical_name]
     if len(matches) > 1:
         raise SystemExit("Multiple owned Repositories match this Agent; specify --repository-id")
     if matches:
         return matches[0]
-    body = {"kind": "agent", "canonical_name": args.name,
+    body = {"kind": "agent", "canonical_name": canonical_name,
             "default_branch": args.default_branch, "visibility": "private"}
     return authenticated(args, "/v1/forge/repositories", method="POST", body=body,
                          idempotency_key=stable_idempotency_key(
-                             "agent-source", args.agent_id, args.name, args.default_branch))
+                             "agent-source", args.agent_id, canonical_name, args.default_branch))
 
 
 def _wait_repository_active(args, repository: dict) -> dict:
@@ -614,7 +636,7 @@ def cmd_agent_source_prepare(args):
                     credential, cwd=workspace, timeout=args.timeout)
                 _git(workspace, "checkout", "--detach", "FETCH_HEAD")
     else:
-        dirty = bool(_git(workspace, "status", "--porcelain"))
+        dirty = _source_workspace_dirty(workspace)
         if dirty and not args.use_local:
             raise SystemExit("Workspace has local changes; use --use-local or commit them before updating")
         credential = issue_git_credential(args, repository_id, "read")
@@ -1743,7 +1765,10 @@ def main():
     source_prepare = sub.add_parser("agent-source-prepare")
     source_prepare.add_argument("workspace")
     source_prepare.add_argument("--agent-id", required=True)
-    source_prepare.add_argument("--name", required=True)
+    source_prepare.add_argument(
+        "--name", default="",
+        help="deprecated display-name compatibility option; Repository name is derived from --agent-id",
+    )
     source_prepare.add_argument("--repository-id", default="")
     source_prepare.add_argument("--default-branch", default="main")
     source_prepare.add_argument("--ref", default="",
