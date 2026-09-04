@@ -1255,6 +1255,20 @@ class PluginTests(unittest.TestCase):
         conditional_delete.assert_called_once_with(
             "production",access_token="stale_access")
 
+    def test_idempotency_key_enables_bounded_post_transport_retry(self):
+        api=load_api()
+        response=mock.MagicMock()
+        response.__enter__.return_value.read.return_value=b'{"ok":true}'
+        with mock.patch.object(api,"access_token",return_value="access"), \
+             mock.patch.object(api,"base_url",return_value="https://agentour.example"), \
+             mock.patch.object(api.time,"sleep"), \
+             mock.patch.object(api.urllib.request,"urlopen",side_effect=[
+                 api.urllib.error.URLError("temporary"),response]) as send:
+            result=api.request("production","/v1/dev/source",method="POST",data=b"{}",
+                auth=True,extra_headers={"Idempotency-Key":"stable"})
+        self.assertEqual(result,{"ok":True})
+        self.assertEqual(send.call_count,2)
+
     def test_account_switch_revokes_old_family_before_new_browser_login(self):
         api=load_api();oauth=sys.modules["oauth_client"]
         credentials={"credential_type":"oauth_public_client_v1",

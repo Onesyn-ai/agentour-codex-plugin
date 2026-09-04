@@ -167,7 +167,8 @@ def request(platform: str, path: str, *, method: str = "GET",
                                required_scopes=required_scopes)
         except OAuthClientError as exc:raise SystemExit(str(exc)) from exc
         headers["Authorization"] = f"Bearer {token}"
-    attempts = 4 if method in {"GET", "HEAD"} else 1
+    idempotent_write = bool(headers.get("Idempotency-Key"))
+    attempts = 4 if method in {"GET", "HEAD"} or idempotent_write else 1
     for attempt in range(attempts):
         req = urllib.request.Request(base_url(platform) + path, data=data,
                                      headers=headers, method=method)
