@@ -1,6 +1,6 @@
 {
   "files": {
-    ".codex-plugin/plugin.json": "aeea808cc66650b16000a4bd01b68e294a99816b6df22e55a656a8ae19d7d213",
+    ".codex-plugin/plugin.json": "95192243bb11dba1012cea65647d7ab58c22b20ba58283912a142db2ad9943ef",
     "guides/agent-wiki.md": "342a750122e501e64e251a9e118a557e471635b9edc3f5a87039736350e9b4ce",
     "guides/feedback.md": "9c4401c0dd78d2f4cdcf073b7ef7ccad8f1f076807782ec3789d010e3dda8fc9",
     "guides/fidelity.md": "498ae5b11627721cc4d333ed9c4ff5ad085c971a7cc6622226ebf38818f75bfb",
@@ -13,7 +13,7 @@
     "scripts/flight_recorder.py": "609d701d5991680669ca5ded6a9669e01d07b5b336aa39a5988b5eb990d2278f",
     "scripts/lark_cli_preflight.py": "1c2c09c79415c7459aa921de0e38dfb45b3affbd13f809a08474312e2cd5ef70",
     "scripts/oauth_client.py": "e6acef70964e2077f285aa140d629f2567834b465b7fffb0f6b1c55137420e1d",
-    "scripts/validate_package.py": "482d7d93088cd4174ec08148a1069b1502351d98e614e9bfb7064c210a12d74b",
+    "scripts/validate_package.py": "f8980d156c30d1b15b0eeb62e2614686c537a0d307fb388cc1667d1d77222296",
     "skills/agentour-brainstorm/SKILL.md": "eb4089e40c4734421aace0cfb5586de56f5ed0a118c53b8e33a2f8553c398af4",
     "skills/agentour-compiler/SKILL.md": "6ab27fcc20bc009bd9d126c94d35c8a4f401a1c978efc90da055ab9d0b5e226f",
     "skills/agentour-compiler/references/feishu-capabilities.md": "ac161c8be22f0f864c26978a4a973522d4df7e15dda79e548bc868318868f16e",
@@ -37,6 +37,6 @@
   "marketplace_name": "agentour-platform",
   "marketplace_source": "./plugins/agentour-compiler",
   "plugin_name": "agentour-compiler",
-  "plugin_version": "0.9.7+codex.20260904014439",
+  "plugin_version": "0.9.7+codex.20260904020157",
   "schema_version": 1
 }

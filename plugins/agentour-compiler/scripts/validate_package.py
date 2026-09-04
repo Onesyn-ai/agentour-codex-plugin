@@ -54,6 +54,9 @@ DIRECT_FEISHU_CLIENT = re.compile(
 CONTEXT_DEPENDENT_EXAMPLE = re.compile(
     r"(?:上传|附件|这些|上述|上一版|上一次|刚才|继续|按之前|按原来|示例\s*\d|换一组|再换一组|XXX|xxx)"
 )
+CONTEXT_DEPENDENT_ATTACHMENT_EXAMPLE = re.compile(
+    r"(?:这些|上述|上一版|上一次|刚才|继续|按之前|按原来|示例\s*\d|换一组|再换一组|XXX|xxx)"
+)
 
 
 def generate_package_lock(root: pathlib.Path) -> dict:
@@ -274,7 +277,10 @@ def main() -> int:
         examples = manifest.get("examples") or []
         if len(examples) < 2 or any(not str(item).strip() or "EXAMPLE_" in str(item) for item in examples):
             critical.append("manifest.examples must contain at least two complete, executable user inputs")
-        elif any(CONTEXT_DEPENDENT_EXAMPLE.search(str(item)) for item in examples):
+        attachment_required = bool(((manifest.get("inputs") or {}).get("attachments") or {}).get("required"))
+        example_pattern = (CONTEXT_DEPENDENT_ATTACHMENT_EXAMPLE if attachment_required
+                           else CONTEXT_DEPENDENT_EXAMPLE)
+        if any(example_pattern.search(str(item)) for item in examples):
             critical.append("manifest.examples must be self-contained and must not depend on attachments or prior context")
 
     scanned = 0
