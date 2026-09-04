@@ -195,6 +195,13 @@ use a long-lived Forgejo PAT, treat the local directory as source authority, or 
 Commit / missing Source Revision as published. After Repository creation, wait for `repository-status`
 to report an active, converged projection before requesting Git access.
 
+For an owned personal private Repository whose authoritative policy requires zero approvals, push the
+validated Package once to the default branch and create the Source Revision with
+`--pull-request-number 0`. Core must verify that the actor owns the Repository and that the Commit is
+the current default-branch HEAD before accepting the direct revision. Do not create a ceremonial PR in
+this lane. Tenant, shared, public, non-owner, or approval-requiring repositories must continue through
+the Pull Request and Review flow above.
+
 For both new Agents and “更新我的 xxx Agent”, run `agent-source-prepare` with the immutable Agent ID
 and canonical name. Pass `--repository-id` whenever Core already binds the Agent to a Repository.
 The two identifiers are deliberately different domains: `--agent-id` must always be copied byte-for-byte

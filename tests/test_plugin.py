@@ -105,7 +105,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.7+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.8+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -772,6 +772,15 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(first.kwargs["body"], {"commit_sha": commit, "pull_request_number": 42})
         self.assertEqual(first.kwargs["idempotency_key"], second.kwargs["idempotency_key"])
         self.assertTrue(first.kwargs["idempotency_key"].startswith("agentour-source-revision-"))
+
+        direct_args = SimpleNamespace(platform="test", repository_id="repo_1",
+                                      commit_sha=commit, pull_request_number=0)
+        with mock.patch.object(api, "authenticated",
+                               return_value={"source_revision_id": "sr_direct"}) as direct_request, \
+             mock.patch.object(api, "record_flight"), mock.patch("builtins.print"):
+            api.cmd_source_revision(direct_args)
+        self.assertEqual(direct_request.call_args.kwargs["body"],
+                         {"commit_sha": commit, "pull_request_number": 0})
 
         changed_pr = SimpleNamespace(platform="test", repository_id="repo_1", commit_sha=commit,
                                      pull_request_number=43)

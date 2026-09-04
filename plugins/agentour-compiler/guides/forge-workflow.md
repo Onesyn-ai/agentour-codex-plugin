@@ -31,7 +31,7 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   pull-request-merge <repository-id> <positive-pr-number> \
   --expected-head-commit-sha <full-head-commit-sha> [--required-approvals <count>]
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
-  source-revision <repository-id> <full-commit-sha> --pull-request-number <positive-pr-number>
+  source-revision <repository-id> <full-commit-sha> --pull-request-number <number-or-zero>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
   source-revision-status <source-revision-id>
 python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|production> \
@@ -48,8 +48,10 @@ python3 "${CODEX_PLUGIN_ROOT}/scripts/agentour_api.py" --platform <test|producti
   --pull-request-number <number> --required-approvals <count> --release-notes <text>
 ```
 
-Source Revision creation always sends both the exact merged Commit and its positive pull request number;
-the Plugin never creates a review-free Source Revision from a branch head or standalone Commit. Every
+Source Revision creation always sends the exact Commit. Owned personal private Repositories with an
+authoritative zero-approval policy use `--pull-request-number 0`; Core accepts this only when the Commit
+is the current default-branch HEAD and records direct-branch evidence. All other repositories send the
+positive merged Pull Request number and remain subject to Review policy. Every
 create command derives a stable `Idempotency-Key` from its immutable identifiers. Status commands
 read the existing Build/Eval resource and never submit replacement work. `agent-release` is the only
 publication command: Core remains the authority for Commit/tree/source, Review, Drive Snapshot,

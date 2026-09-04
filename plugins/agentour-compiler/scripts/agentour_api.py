@@ -331,6 +331,11 @@ def pull_request_number(value: str) -> int:
                        option="--pull-request-number")
 
 
+def source_pull_request_number(value: str) -> int:
+    return bounded_int(value, minimum=0, maximum=2_147_483_647,
+                       option="--pull-request-number")
+
+
 def commit_sha_argument(value: str, *, option: str) -> str:
     normalized = str(value or "").lower()
     if not _FULL_COMMIT_SHA.fullmatch(normalized):
@@ -1835,7 +1840,7 @@ def main():
     source_revision = sub.add_parser("source-revision")
     source_revision.add_argument("repository_id")
     source_revision.add_argument("commit_sha")
-    source_revision.add_argument("--pull-request-number", type=pull_request_number,
+    source_revision.add_argument("--pull-request-number", type=source_pull_request_number,
                                  required=True)
     source_revision_status = sub.add_parser("source-revision-status")
     source_revision_status.add_argument("source_revision_id")

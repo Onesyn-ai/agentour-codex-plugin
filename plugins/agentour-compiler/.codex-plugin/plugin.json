@@ -1,6 +1,6 @@
 {
   "name": "agentour-compiler",
-  "version": "0.9.7+codex.20260904093055",
+  "version": "0.9.8+codex.20260904193233",
   "description": "Create, update or reconstruct Agentour Agents with validation and publishing.",
   "author": {
     "name": "Agentour Platform",
