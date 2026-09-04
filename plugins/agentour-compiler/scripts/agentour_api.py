@@ -230,6 +230,16 @@ def package_payload(package_dir: pathlib.Path) -> tuple[bytes, dict]:
                      "archive_bytes": len(payload), "largest": largest}
 
 
+def package_content_digest(package_dir: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    for path, relative in package_files(package_dir):
+        digest.update(relative.as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
 def authenticated(args, path: str, *, method: str = "GET", body: dict | None = None,
                   idempotency_key: str = "", required_scopes: tuple[str, ...] = (),
                   interactive_auth: bool = False):
@@ -1433,8 +1443,11 @@ def cmd_validate(args):
     max_mb = int(contract["package"]["upload_max_mb"])
     if len(payload) > max_mb * 1024 * 1024:
         raise SystemExit(f"Clean archive exceeds {max_mb}MB")
+    operation = stable_idempotency_key(
+        "validate-package", package_content_digest(package), str(args.attempt))
     result = request(args.platform, "/v1/dev/validate-package", method="POST",
-                     data=payload, auth=True, content_type="application/gzip")
+                     data=payload, auth=True, content_type="application/gzip",
+                     extra_headers={"Idempotency-Key": operation})
     record_flight("validation_submitted", platform=args.platform, package=str(package),
                   archive=stats, response=result)
     job_id = result.get("job_id")
@@ -1825,6 +1838,9 @@ def main():
     validate.add_argument("package")
     validate.add_argument("--timeout", type=float, default=1800)
     validate.add_argument("--poll-interval", type=float, default=2)
+    validate.add_argument("--attempt", type=lambda value: bounded_int(
+        value, minimum=1, maximum=3, option="--attempt"), default=1,
+        help="explicit retry generation for a terminal infrastructure failure")
     remote_build = sub.add_parser("remote-build")
     remote_build.add_argument("package")
     remote_build.add_argument("--no-wait", action="store_true")

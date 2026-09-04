@@ -1456,6 +1456,16 @@ class PluginTests(unittest.TestCase):
         self.assertLess(waits[0],0.2)
         self.assertGreater(waits[1],0.25)
 
+    def test_package_content_digest_ignores_filesystem_timestamps(self):
+        api=load_api()
+        with tempfile.TemporaryDirectory() as td:
+            package=pathlib.Path(td)
+            source=package/"agentour.json"
+            source.write_text('{"id":"stable"}',encoding="utf-8")
+            first=api.package_content_digest(package)
+            os.utime(source,(source.stat().st_atime+60,source.stat().st_mtime+60))
+            self.assertEqual(api.package_content_digest(package),first)
+
     def test_conditional_delete_preserves_a_newer_credential_generation(self):
         path=PLUGIN/"scripts/credential_store.py"
         spec=importlib.util.spec_from_file_location("credential_store_conditional",path)

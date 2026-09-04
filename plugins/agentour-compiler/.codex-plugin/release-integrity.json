@@ -1,13 +1,13 @@
 {
   "files": {
-    ".codex-plugin/plugin.json": "63dc01375a2f7f69b32d4fc9e07b90c0f6c07e46b663dfe9b22f444376483b37",
+    ".codex-plugin/plugin.json": "38e9e642986bcbfa1a5f2cd94d67f78c3e6e8ee9d9b847ce3d9e1938daa731ad",
     "guides/agent-wiki.md": "342a750122e501e64e251a9e118a557e471635b9edc3f5a87039736350e9b4ce",
     "guides/feedback.md": "9c4401c0dd78d2f4cdcf073b7ef7ccad8f1f076807782ec3789d010e3dda8fc9",
     "guides/fidelity.md": "498ae5b11627721cc4d333ed9c4ff5ad085c971a7cc6622226ebf38818f75bfb",
     "guides/forge-workflow.md": "bdfd3b23953494de0f6c219ea55c7e46a7b7bd46ade229479ec46ef7d1787ad7",
     "guides/publishing.md": "45561c3f0af779a8f51e1d1fb818c7804f59df5c903f81e362b709ebb83f7e34",
     "guides/runtime-ui.md": "3c248862806bf74ef79ada91c2474546cc31ea3584f7bb38553c04d1405b5c99",
-    "scripts/agentour_api.py": "1cb368f1055377dfce77ecc3ff98e2303fcc593bd574a52599e438452b7a67d7",
+    "scripts/agentour_api.py": "a6840848ede7ebbe9c5a9b2d3a52c8b89ddb4bc960f358df4a9e418f9fa8c7fc",
     "scripts/credential_store.py": "ddd2ef9b575e3666b59278654880f44a9114e0538b964d82fd34bd36b00a8f37",
     "scripts/fidelity_report.py": "010a1d1d64d59a5cd34183ff983d640d6e7bd374f3c101c3c64197e802dee303",
     "scripts/flight_recorder.py": "609d701d5991680669ca5ded6a9669e01d07b5b336aa39a5988b5eb990d2278f",
@@ -37,6 +37,6 @@
   "marketplace_name": "agentour-platform",
   "marketplace_source": "./plugins/agentour-compiler",
   "plugin_name": "agentour-compiler",
-  "plugin_version": "0.9.7+codex.20260904004637",
+  "plugin_version": "0.9.7+codex.20260904011814",
   "schema_version": 1
 }
