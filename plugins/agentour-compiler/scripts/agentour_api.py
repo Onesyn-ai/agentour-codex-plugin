@@ -1513,6 +1513,24 @@ def cmd_validate(args):
     raise SystemExit(f"Validation job {job_id} timed out")
 
 
+def cmd_validation_status(args):
+    print(json.dumps(authenticated(
+        args, f"/v1/dev/validate-jobs/{urllib.parse.quote(args.job_id, safe='')}"),
+        ensure_ascii=False, indent=2))
+
+
+def cmd_reconcile_validation(args):
+    print(json.dumps(authenticated(
+        args, f"/v1/dev/validate-jobs/{urllib.parse.quote(args.job_id, safe='')}/reconcile",
+        method="POST", body={}), ensure_ascii=False, indent=2))
+
+
+def cmd_cancel_validation(args):
+    print(json.dumps(authenticated(
+        args, f"/v1/dev/validate-jobs/{urllib.parse.quote(args.job_id, safe='')}/cancel",
+        method="POST", body={}), ensure_ascii=False, indent=2))
+
+
 def cmd_remote_build(args):
     package = pathlib.Path(args.package).resolve()
     payload, stats = package_payload(package)
@@ -1877,6 +1895,9 @@ def main():
     validate.add_argument("--attempt", type=lambda value: bounded_int(
         value, minimum=1, maximum=3, option="--attempt"), default=1,
         help="explicit retry generation for a terminal infrastructure failure")
+    for command in ("validation-status", "reconcile-validation", "cancel-validation"):
+        validation_command = sub.add_parser(command)
+        validation_command.add_argument("job_id")
     remote_build = sub.add_parser("remote-build")
     remote_build.add_argument("package")
     remote_build.add_argument("--no-wait", action="store_true")
@@ -2006,6 +2027,12 @@ def main():
         cmd_build_test(args)
     elif args.command == "validate-package":
         cmd_validate(args)
+    elif args.command == "validation-status":
+        cmd_validation_status(args)
+    elif args.command == "reconcile-validation":
+        cmd_reconcile_validation(args)
+    elif args.command == "cancel-validation":
+        cmd_cancel_validation(args)
     elif args.command == "remote-build":
         cmd_remote_build(args)
     elif args.command == "cancel-build":

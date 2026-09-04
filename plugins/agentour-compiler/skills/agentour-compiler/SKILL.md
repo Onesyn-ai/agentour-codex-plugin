@@ -176,6 +176,10 @@ uses a fresh Idempotency-Key because Core intentionally returns `409` rather tha
 
 After submitting Build or Eval, resume the same remote record with `source-build-status` or
 `source-eval-status`; an interrupted read is not authorization to create a replacement Job.
+For a Validation whose heartbeat stops, use `validation-status <job-id>` first, then
+`reconcile-validation <job-id>` to coordinate a stale orphan into a retryable terminal state.
+Use `cancel-validation <job-id>` only when cancellation is intended. Never replace a merely
+unobservable or still-healthy Validation with another attempt.
 
 After every remote stage, write `save-forge-checkpoint` with only Repository ID, full Commit SHA,
 current remote Job ID, contract version, and stage. Restore it with `restore-forge-checkpoint`; when the

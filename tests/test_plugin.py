@@ -1726,6 +1726,21 @@ class PluginTests(unittest.TestCase):
                 for call in submit.call_args_list]
         self.assertNotEqual(keys[0], keys[1])
 
+    def test_validation_lifecycle_commands_target_the_original_job(self):
+        api = load_api()
+        args = SimpleNamespace(platform="production", job_id="val/one")
+        with mock.patch.object(api, "authenticated", return_value={
+                "job_id": "val/one", "status": "timed_out"}) as request, \
+             mock.patch("builtins.print"):
+            api.cmd_validation_status(args)
+            api.cmd_reconcile_validation(args)
+            api.cmd_cancel_validation(args)
+        self.assertEqual([call.args[1] for call in request.call_args_list], [
+            "/v1/dev/validate-jobs/val%2Fone",
+            "/v1/dev/validate-jobs/val%2Fone/reconcile",
+            "/v1/dev/validate-jobs/val%2Fone/cancel",
+        ])
+
     def test_valid_package(self):
         with tempfile.TemporaryDirectory() as temp:
             package = pathlib.Path(temp) / "demo"
