@@ -105,7 +105,7 @@ class PluginTests(unittest.TestCase):
         market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "agentour-compiler")
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
-        self.assertTrue(manifest["version"].startswith("0.9.8+codex."))
+        self.assertTrue(manifest["version"].startswith("0.9.9+codex."))
 
     def test_release_integrity_snapshot_matches_candidate(self):
         verifier = load_release_verifier()
@@ -1174,6 +1174,28 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(request.call_args.kwargs["body"]["operation_id"], operation)
         self.assertEqual(request.call_args.kwargs["required_scopes"], ("agent:publish",))
         self.assertTrue(request.call_args.kwargs["interactive_auth"])
+
+    def test_direct_agent_release_distinguishes_zero_from_missing_pr(self):
+        api=load_api();commit="a"*40
+        def args(number):
+            return SimpleNamespace(platform="test",agent_id="agt_1",version="1.2.3",
+                source_ref="main",source_revision_id="src_1",source_commit_sha=commit,
+                pull_request_number=number,required_approvals=0,release_notes="Ready")
+        def response(operation):
+            return {"id":"rel_1","operation_id":operation,"agent_id":"agt_1",
+                "version":"1.2.3","state":"failed","repository_id":"repo_1",
+                "source_commit_sha":commit,"collection_id":"col_1",
+                "failed_stage":"source_pushed","error_code":"provider"}
+        operations=[]
+        def call(call_args,path,**kwargs):
+            operations.append(kwargs["idempotency_key"])
+            return response(kwargs["idempotency_key"])
+        with mock.patch.object(api,"authenticated",side_effect=call), \
+             mock.patch.object(api,"record_flight"),mock.patch("builtins.print"):
+            api.cmd_agent_release(args(None));api.cmd_agent_release(args(0))
+        self.assertNotEqual(operations[0],operations[1])
+        self.assertEqual(operations[1],api.stable_idempotency_key(
+            "agent-release","agt_1","1.2.3","src_1",commit,"main","0"))
 
     def test_compiler_task_commands_send_expected_contract(self):
         api = load_api()

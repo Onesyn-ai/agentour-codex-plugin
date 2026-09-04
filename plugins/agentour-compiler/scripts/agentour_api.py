@@ -969,9 +969,11 @@ def cmd_agent_release(args):
     # A merged PR's immutable source is the repository main commit; using the
     # feature ref here causes Core to report source_commit drift.
     source_ref = "main" if args.pull_request_number else args.source_ref
+    pull_request_identity = ("" if args.pull_request_number is None else
+                             str(args.pull_request_number))
     operation = stable_idempotency_key(
         "agent-release", args.agent_id, args.version, args.source_revision_id,
-        args.source_commit_sha, source_ref, str(args.pull_request_number or ""),
+        args.source_commit_sha, source_ref, pull_request_identity,
     )
     body = {
         "operation_id": operation,
@@ -1863,7 +1865,7 @@ def main():
     agent_release.add_argument("--source-ref", required=True)
     agent_release.add_argument("--source-revision-id", required=True)
     agent_release.add_argument("--source-commit-sha", required=True, type=full_commit_sha)
-    agent_release.add_argument("--pull-request-number", type=pull_request_number)
+    agent_release.add_argument("--pull-request-number", type=source_pull_request_number)
     agent_release.add_argument("--required-approvals", type=lambda value: bounded_int(
         value, minimum=0, maximum=100, option="--required-approvals"), default=0)
     agent_release.add_argument("--release-notes", default="")
