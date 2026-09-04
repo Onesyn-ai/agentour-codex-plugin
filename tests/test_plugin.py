@@ -1700,6 +1700,32 @@ class PluginTests(unittest.TestCase):
                      "data": {"gates": [{"gate": "remote_build", "status": "pass"}]}}):
                 api.cmd_remote_build(args)
 
+    def test_validation_automatically_advances_past_terminal_replay(self):
+        api = load_api()
+        with tempfile.TemporaryDirectory() as temp:
+            package = pathlib.Path(temp) / "demo"
+            self.make_package(package)
+            args = SimpleNamespace(package=str(package), platform="production",
+                                   attempt=1, timeout=10, poll_interval=0)
+            responses = [
+                {"job_id": "val_failed", "status": "failed", "idempotent_replay": True},
+                {"job_id": "val_new", "status": "queued"},
+            ]
+            with mock.patch.object(api, "authenticated", return_value={
+                    "package": {"upload_max_mb": 20}}), \
+                 mock.patch.object(api, "request", side_effect=responses) as submit, \
+                 mock.patch.object(api, "poll_job", return_value={
+                    "id": "val_new", "status": "succeeded", "updated_at": 1}), \
+                 mock.patch.object(api, "record_flight"), \
+                 mock.patch.object(api, "record_job_sample"), \
+                 mock.patch.object(api, "sync_flight"), \
+                 mock.patch("builtins.print"):
+                api.cmd_validate(args)
+        self.assertEqual(submit.call_count, 2)
+        keys = [call.kwargs["extra_headers"]["Idempotency-Key"]
+                for call in submit.call_args_list]
+        self.assertNotEqual(keys[0], keys[1])
+
     def test_valid_package(self):
         with tempfile.TemporaryDirectory() as temp:
             package = pathlib.Path(temp) / "demo"

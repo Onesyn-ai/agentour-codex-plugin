@@ -1466,11 +1466,21 @@ def cmd_validate(args):
     max_mb = int(contract["package"]["upload_max_mb"])
     if len(payload) > max_mb * 1024 * 1024:
         raise SystemExit(f"Clean archive exceeds {max_mb}MB")
-    operation = stable_idempotency_key(
-        "validate-package", package_content_digest(package), str(args.attempt))
-    result = request(args.platform, "/v1/dev/validate-package", method="POST",
-                     data=payload, auth=True, content_type="application/gzip",
-                     extra_headers={"Idempotency-Key": operation})
+    result = None
+    for generation in range(args.attempt, 4):
+        operation = stable_idempotency_key(
+            "validate-package", package_content_digest(package), str(generation))
+        result = request(args.platform, "/v1/dev/validate-package", method="POST",
+                         data=payload, auth=True, content_type="application/gzip",
+                         extra_headers={"Idempotency-Key": operation})
+        if not (result.get("idempotent_replay") is True and
+                result.get("status") in {"failed", "cancelled", "timed_out"} and
+                generation < 3):
+            break
+        record_flight("validation_retry_generation_advanced", platform=args.platform,
+                      package=str(package), failed_job_id=result.get("job_id"),
+                      from_generation=generation, to_generation=generation + 1)
+    assert result is not None
     record_flight("validation_submitted", platform=args.platform, package=str(package),
                   archive=stats, response=result)
     job_id = result.get("job_id")
