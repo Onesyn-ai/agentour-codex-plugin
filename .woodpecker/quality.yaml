@@ -1,0 +1,20 @@
+when:
+  - event: [push, pull_request, tag, manual]
+
+labels:
+  workload: light
+  platform: linux/amd64
+
+clone:
+  - name: git
+    image: 127.0.0.1:5000/onesyn-ci/plugin-git@sha256:dc5caaa8b089588e6fc81a0bfe95da4279208731cae299bd1bf8790095b947ed
+
+steps:
+  - name: plugin-quality
+    image: 127.0.0.1:5000/onesyn-ci/python-quality@sha256:964ebb17f2fb26b64cd22579b2c0834bc6aa74fcbb5e5541d4c91189afe7536c
+    commands:
+      - git rev-parse HEAD
+      - python scripts/validate_all.py
+      - python scripts/verify_plugin_release.py verify-source
+      - python -m unittest tests.test_plugin
+      - python -m compileall -q plugins/agentour-compiler/scripts
